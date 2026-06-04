@@ -1,9 +1,11 @@
 """
 Telegram-бот для генерации ТЗ и критериев допуска.
+Поддерживает голос, текст и свободный чат с ИИ.
 """
 
 import os
 import logging
+import anthropic
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     Application, CommandHandler, MessageHandler,
@@ -23,6 +25,14 @@ ANSWERING = 2
 CRITERIA_Q = 3
 
 sessions: dict[int, TenderAgent] = {}
+
+CHAT_SYSTEM = """Ты — помощник специалиста по тендерам и закупкам.
+Ты помогаешь составлять технические задания и критерии допуска для закупок.
+Отвечай на русском языке, кратко и по существу.
+Если пользователь хочет создать ТЗ или критерии допуска — скажи ему написать /new.
+"""
+
+claude = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
 
 
 async def get_text(update: Update) -> str | None:
@@ -70,8 +80,11 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data.clear()
     await update.message.reply_text(
         "Добро пожаловать!\n\n"
-        "Я помогу подготовить Техническое задание и Критерии допуска для тендера.\n\n"
-        "Нажмите /new чтобы начать."
+        "Я помогу вам:\n"
+        "• Составить Техническое задание (ТЗ)\n"
+        "• Подготовить Критерии допуска\n"
+        "• Ответить на вопросы по тендерам и закупкам\n\n"
+        "Нажмите /new чтобы создать документ, или просто напишите вопрос!"
     )
 
 
@@ -80,6 +93,36 @@ async def new_request(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data.clear()
     await update.message.reply_text("Выберите направление закупки:", reply_markup=direction_kb())
     return CHOOSING
+
+
+async def chat_reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Свободный чат — отвечаем через Claude как ассистент."""
+    text = await get_text(update)
+    if not text:
+        return
+
+    # Сохраняем историю чата (последние 10 сообщений)
+    history = context.user_data.get("chat_history", [])
+    history.append({"role": "user", "content": text})
+    if len(history) > 20:
+        history = history[-20:]
+
+    await update.message.reply_text("⏳ Думаю...")
+
+    try:
+        response = claude.messages.create(
+            model="claude-sonnet-4-5",
+            max_tokens=1000,
+            system=CHAT_SYSTEM,
+            messages=history,
+        )
+        reply = response.content[0].text
+        history.append({"role": "assistant", "content": reply})
+        context.user_data["chat_history"] = history
+        await update.message.reply_text(reply)
+    except Exception as e:
+        logger.error(f"Ошибка чата: {e}", exc_info=True)
+        await update.message.reply_text("Произошла ошибка. Попробуйте ещё раз.")
 
 
 async def cb_direction(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -238,7 +281,7 @@ async def cb_criteria(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     sessions.pop(update.effective_user.id, None)
     context.user_data.clear()
-    await update.message.reply_text("Отменено. Нажмите /new для нового запроса.")
+    await update.message.reply_text("Отменено. Напишите любой вопрос или /new для нового запроса.")
     return ConversationHandler.END
 
 
@@ -247,9 +290,7 @@ def main():
     tv = (filters.TEXT | filters.VOICE) & ~filters.COMMAND
 
     conv = ConversationHandler(
-        entry_points=[
-            CommandHandler("new", new_request),
-        ],
+        entry_points=[CommandHandler("new", new_request)],
         states={
             CHOOSING: [
                 CallbackQueryHandler(cb_direction, pattern="^dir_"),
@@ -269,6 +310,9 @@ def main():
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(conv)
+    # Свободный чат — срабатывает когда пользователь НЕ в диалоге создания ТЗ
+    app.add_handler(MessageHandler(tv, chat_reply))
+
     logger.info("Бот запущен.")
     app.run_polling(allowed_updates=Update.ALL_TYPES)
 
