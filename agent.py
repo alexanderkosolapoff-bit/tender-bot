@@ -139,7 +139,7 @@ class TenderAgent:
 
     def _call(self, system: str, user: str, max_tokens: int = 4000) -> str:
         r = self.client.messages.create(
-            model="claude-3-5-sonnet-20241022",
+            model="claude-3-haiku-20240307",
             max_tokens=max_tokens,
             system=system,
             messages=[{"role": "user", "content": user}]
