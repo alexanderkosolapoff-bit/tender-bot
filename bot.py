@@ -1,6 +1,6 @@
 """
 Telegram-бот для генерации ТЗ и критериев допуска.
-Поддерживает голос, текст и свободный чат с ИИ.
+Поддерживает голос, текст, свободный чат и веб-поиск.
 """
 
 import os
@@ -26,11 +26,20 @@ CRITERIA_Q = 3
 
 sessions: dict[int, TenderAgent] = {}
 
-CHAT_SYSTEM = """Ты — помощник специалиста по тендерам и закупкам.
-Ты помогаешь составлять технические задания и критерии допуска для закупок.
-Отвечай на русском языке, кратко и по существу.
-Если пользователь хочет создать ТЗ или критерии допуска — скажи ему написать /new.
+CHAT_SYSTEM = """Ты — умный помощник и эксперт по тендерам и закупкам.
+Ты можешь:
+- Составлять технические задания и критерии допуска (для этого пользователь пишет /new)
+- Отвечать на любые вопросы — по закупкам, законодательству, и на любые другие темы
+- Искать актуальную информацию в интернете когда это нужно
+
+Отвечай на русском языке. Будь полезным, дружелюбным и конкретным.
+Если пользователь хочет создать ТЗ или критерии допуска — напомни про /new.
 """
+
+WEB_SEARCH_TOOL = {
+    "type": "web_search_20250305",
+    "name": "web_search",
+}
 
 claude = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
 
@@ -80,11 +89,11 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data.clear()
     await update.message.reply_text(
         "Добро пожаловать!\n\n"
-        "Я помогу вам:\n"
-        "• Составить Техническое задание (ТЗ)\n"
-        "• Подготовить Критерии допуска\n"
-        "• Ответить на вопросы по тендерам и закупкам\n\n"
-        "Нажмите /new чтобы создать документ, или просто напишите вопрос!"
+        "Я умный помощник — могу:\n"
+        "📄 Составить ТЗ и критерии допуска → /new\n"
+        "💬 Ответить на любой вопрос\n"
+        "🔍 Найти информацию в интернете\n\n"
+        "Просто напишите что вас интересует!"
     )
 
 
@@ -96,12 +105,11 @@ async def new_request(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def chat_reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Свободный чат — отвечаем через Claude как ассистент."""
+    """Свободный чат с веб-поиском."""
     text = await get_text(update)
     if not text:
         return
 
-    # Сохраняем историю чата (последние 10 сообщений)
     history = context.user_data.get("chat_history", [])
     history.append({"role": "user", "content": text})
     if len(history) > 20:
@@ -110,16 +118,58 @@ async def chat_reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("⏳ Думаю...")
 
     try:
+        # Первый запрос — Claude решает нужен ли поиск
         response = claude.messages.create(
             model="claude-sonnet-4-5",
-            max_tokens=1000,
+            max_tokens=2000,
             system=CHAT_SYSTEM,
+            tools=[WEB_SEARCH_TOOL],
             messages=history,
         )
-        reply = response.content[0].text
+
+        # Обрабатываем ответ — может быть несколько шагов если был поиск
+        messages = list(history)
+        while response.stop_reason == "tool_use":
+            # Claude использует поиск — собираем результаты
+            tool_results = []
+            for block in response.content:
+                if block.type == "tool_use":
+                    tool_results.append({
+                        "type": "tool_result",
+                        "tool_use_id": block.id,
+                        "content": block.input.get("query", ""),
+                    })
+
+            messages.append({"role": "assistant", "content": response.content})
+            messages.append({"role": "user", "content": tool_results})
+
+            # Повторный запрос с результатами поиска
+            response = claude.messages.create(
+                model="claude-sonnet-4-5",
+                max_tokens=2000,
+                system=CHAT_SYSTEM,
+                tools=[WEB_SEARCH_TOOL],
+                messages=messages,
+            )
+
+        # Извлекаем текстовый ответ
+        reply = ""
+        for block in response.content:
+            if hasattr(block, "text"):
+                reply += block.text
+
+        if not reply:
+            reply = "Не смог найти ответ. Попробуйте переформулировать вопрос."
+
         history.append({"role": "assistant", "content": reply})
         context.user_data["chat_history"] = history
+
+        # Telegram ограничивает сообщения 4096 символами
+        if len(reply) > 4000:
+            reply = reply[:4000] + "...\n\n(ответ сокращён)"
+
         await update.message.reply_text(reply)
+
     except Exception as e:
         logger.error(f"Ошибка чата: {e}", exc_info=True)
         await update.message.reply_text("Произошла ошибка. Попробуйте ещё раз.")
@@ -310,7 +360,6 @@ def main():
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(conv)
-    # Свободный чат — срабатывает когда пользователь НЕ в диалоге создания ТЗ
     app.add_handler(MessageHandler(tv, chat_reply))
 
     logger.info("Бот запущен.")
