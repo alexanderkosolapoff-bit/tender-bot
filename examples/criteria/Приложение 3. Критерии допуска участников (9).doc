@@ -1,0 +1,189 @@
+﻿
+<!DOCTYPE html>
+<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40">
+<head>
+                <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+                <title>Критерии допуска</title>
+                <style>
+                               html{font-family: "Times New Roman";font-size: 7pt;background-color:#ccc; padding:1cm; min-width:100%; width:fit-content;box-sizing: border-box;}
+                               body{padding:1cm; background-color:#fff; box-shadow:#555 0 0 8px;margin: 0 auto;width: 210mm; min-height: 297mm; box-sizing: border-box;}
+                               h1{margin:0 0 0.4em 0; text-align: center;font-size: 13pt;}
+                               h2{margin: 0.4em 0 0.4em 0;font-size: 9pt;}
+                               table{font-family: "Times New Roman";font-size: 7pt; border-collapse:collapse; margin-top: 0.5em; margin-bottom: 0.5em;mso-pagination: widow-orphan;mso-displayed-decimal-separator: "\.";mso-displayed-thousand-separator: " ";}
+                               tr{page-break-inside: avoid;}
+                                th{page-break-inside: avoid;}
+                               th p.MsoNormal { text-align: center; }
+                               td{page-break-inside: avoid;border: 1px solid transparent;vertical-align: top;padding: 1pt;}
+                               .gridLines td{border: 1px dotted #ddd;}
+                               .gridLines th{border: 1px dotted #ddd;border-bottom:1px solid #888;}
+                               table.io th{text-align:right;padding:0.55em;border-bottom:1px dotted #888;border-top:1px dotted #888;width:16.8em;vertical-align:top;}
+                               table.io td{padding:0.55em;border-bottom:1px dotted #888;border-top:1px dotted #888;}
+                               table.data { width:100%;table-layout: fixed; }
+                               table.data th { border:1px solid #888;vertical-align: bottom;padding:1pt; font-weight: bold}
+                               table.data th.mid { border-bottom:1px solid #888;}
+                               table.data td { border:1px solid #888;}
+                               .editor, .debug{background: #efeded;color: #888;font-size: 70%;}
+                               .num {width:10em;text-align: right;white-space:nowrap;}
+                               .numc {width:10em;text-align: center;white-space:nowrap;}
+                               .snum {width:4em;text-align: right;white-space:nowrap;}
+                               .num p.MsoNormal, .snum p.MsoNormal {text-align: right;white-space:nowrap;}
+                               .numc p.MsoNormal {text-align: center;white-space:nowrap;}
+                               .desc{font-size: 80%;color:#777;}
+                               .desc.num{width: 12.5em;}
+                               h1 .desc { font-weight: normal;font-size: 0.5em;padding-top: 1em; }
+                               td.ord { width: 20%;}
+                               div.qnt { float: right; font-size: 60%; font-weight: normal; }
+                               table.total { width: auto; border: none; }
+                               table.total th, table.total td {text-align:right; vertical-align:top; border: none;}
+                               div.pt { font-size: 80%; text-align: right; color: #888; }
+                               .PrintFormStat, .RequestStat {max-height: 1.9em;overflow: hidden;border: 1px solid #ccc;padding: 4px;box-sizing: border-box;cursor: default;font-size: 7pt;font-family: monospace;color: #777;background-color: #fff;}
+                               .PrintFormStat:hover, .RequestStat:hover {max-height: none;overflow: visible;}
+                               .PrintFormStat table, .RequestStat table {margin-bottom: -5px;font-size: 7pt;font-family: monospace;}
+                               .PrintFormStat td, .RequestStat td {border-top: 1px solid #ccc;border-bottom: 1px solid #ccc;}
+                               .PrintFormStat th, .RequestStat th {background-color: #ccc;color:#fff;}
+                               @page{marks: crop cross; bleed: auto; size: A4 portrait; margin: 1cm;}
+                               @page WordSection1 { size: 210mm 297mm; mso-page-orientation: portrait; margin: 1cm 1cm 1cm 1cm; box-sizing:border-box; }
+                               div.WordSection1{ page: WordSection1; }
+                               @media print {
+                                               html{padding:0;background-color:transparent;}
+                                               body{padding:0;margin:0;box-shadow:none;width:initial !important;min-height:initial !important;}
+                                               thead { display: table-header-group; }
+                                               .PrintFormStat, .RequestStat {display:none;}
+                               }
+                               .right { text-align: right; }
+                               .n0p /* целое число */ { mso-number-format: '0'; }
+                               .n2p /* два знака после десятичной точки */ { mso-number-format: '0.00'; }
+                               .date { mso-number-format: 'dd.mm.yyyy'; text-align: center; white-space: nowrap; }
+                               .noborders, .noborders td { border: none; }
+                               .autow { width: auto; }
+                               p.MsoNormal, li.MsoNormal, div.MsoNormal { mso-style-unhide: no; mso-style-qformat: yes; mso-style-parent: ""; margin: 0.1em 0; padding:0; text-align: left; mso-pagination: widow-orphan; font-size: 7pt; font-family: "Times New Roman",serif; mso-fareast-font-family: "Times New Roman"; mso-fareast-theme-font: minor-fareast; }
+							   .bottomText { text-align: justify; font-family: "Times New Roman",serif; font-size: 7pt; white-space: wrap; font-style: italic; }
+                </style>
+</head>
+<body>
+                <div class=WordSection1>
+                               <p class="right" style="text-align: right;">Приложение №3</p>
+                               <h1>Критерии допуска участников "Капитальный ремонт двух многоквартирных домов в с. Мальбагуш, Республика Татарстан (закупка "Под ключ")"</h1>
+                               <table class="data" border="1" cellspacing="0" cellpadding="1">
+                                               <colgroup>
+                                                               <col style="width: 8mm;"/>
+                                                               <col style="width: auto;"/>
+                                                               <col style="width: 35%;"/>
+                                                               <col style="width: 35%;"/>
+                                               </colgroup>
+
+                                               <tr>
+                                                    <th>
+                                                        <p class="MsoNormal"  style="text-align: center;">
+                                                            <strong>№ п/п</strong>
+                                                        </p>
+                                                    </th>
+                                                    <th>
+                                                        <p class="MsoNormal"  style="text-align: center;">
+                                                            <strong>Наименование критерия</strong>
+                                                        </p>
+                                                    </th>
+                                                    <th>
+                                                        <p class="MsoNormal"  style="text-align: center;">
+                                                            <strong>Значение</strong>
+                                                        </p>
+                                                    </th>
+                                                    <th>
+                                                        <p class="MsoNormal"  style="text-align: center;">
+                                                            <strong>Подтверждающий документ</strong>
+                                                        </p>
+                                                    </th>
+                                               </tr>
+                                                                               <tr>
+                                                                                              <td class="snum"><p class="MsoNormal">1.</p></td>
+                                                                                              <td><p class="MsoNormal">Наличие допуска саморегулируемой организации. Наличие права производства работ на объектах капитального строительства.</p></td>
+                                                                                              <td>
+                                                                                                                                              <p class="MsoNormal">СРО с уровнем ответственности в соответствии с поданным предложением. Кроме особо опасных, технически сложных и уникальных объектов, объектов использования атомной энергии)</p>
+</td>
+                                                                                              <td><p class="MsoNormal">Выписка СРО (указывается номер, дата выдачи СРО, категория соответствия требованиям, скан-копия прикладывается отдельно к тендерной документации). В случае отсутствия достаточного уровня СРО на СМР, возможна подача предложения с гарантийным письмом о расширении полномочий до необходимого уровня права до начала выполнения работ. При сумме предложения до 10 млн. рублей членство в СРО не требуется (№ 124-ФЗ от 01.05.2022)</p></td>
+                                                                               </tr>
+                                                                               <tr>
+                                                                                              <td class="snum"><p class="MsoNormal">2.</p></td>
+                                                                                              <td><p class="MsoNormal">Квалифицированный  персонал рабочих специальностей  </p></td>
+                                                                                              <td>
+                                                                                                                                              <p class="MsoNormal">Общее количество рабочего персонала по профилю выполняемых работ - не менее 14 чел. Для участия в тендере достаточно наличия не менее 80% требуемого количества рабочего персонала. В данном случае необходимо приложить гарантийное письмо о полном соответствии данному критерию к началу выполнения работ.</p>
+</td>
+                                                                                              <td><p class="MsoNormal">Справка по форме (приложение 3.1) за подписью руководителя организации.
+По запросу Заказчика предоставляются скан-копии подтверждающих документов (штатное расписание, документы об образовании, свидетельства, удостоверения, справка по форме КНД 1151162 за последний отчетный период (при отсутствии справки кол-во персонала принимается по данным системы контур. Фокус))</p></td>
+                                                                               </tr>
+                                                                               <tr>
+                                                                                              <td class="snum"><p class="MsoNormal">3.</p></td>
+                                                                                              <td><p class="MsoNormal">Квалифицированные кадры инженерно-технических специальностей</p></td>
+                                                                                              <td>
+                                                                                                                                              <p class="MsoNormal">Руководитель, бухгалтер, инженер-сметчик/инженер ПТО, мастер/прораб</p>
+</td>
+                                                                                              <td><p class="MsoNormal">Справка по форме (приложение 3.1) за подписью руководителя организации.
+По запросу Заказчика предоставляются скан-копии подтверждающих документов (штатное расписание, документы об образовании, свидетельства, удостоверения, справка по форме КНД 1151162 за последний отчетный период (при отсутствии справки кол-во персонала принимается по данным системы контур. Фокус))</p></td>
+                                                                               </tr>
+                                                                               <tr>
+                                                                                              <td class="snum"><p class="MsoNormal">4.</p></td>
+                                                                                              <td><p class="MsoNormal">Наличие службы охраны труда (ОТ)/ответственного специалиста по ОТ</p></td>
+                                                                                              <td>
+                                                                                                                                              <p class="MsoNormal">В случае, если численность работников предприятия превышает 50 чел. необходимо подтверждение о наличии службы ОТ или специалиста по ОТ. В случае, если численность работников предприятия не превышает 50 чел. достаточно приказа о возложении обязанностей по ОТ на ответственного специалиста.</p>
+</td>
+                                                                                              <td><p class="MsoNormal">Штатное расписание предприятия/приказ о возложении обязанностей на ответственное лицо</p></td>
+                                                                               </tr>
+                                                                               <tr>
+                                                                                              <td class="snum"><p class="MsoNormal">5.</p></td>
+                                                                                              <td><p class="MsoNormal">Наличие оборудования и специализированной техники </p></td>
+                                                                                              <td>
+                                                                                                                                              <p class="MsoNormal">Оборудование и техника, необходимая для выполнения работ согласно Локального-сметного расчета или иного документа представленного в составе закупочной документации (ТЗ, ДВ)</p>
+</td>
+                                                                                              <td><p class="MsoNormal">Справка по форме (приложение 3.2) за подписью руководителя организации.
+По запросу Заказчика предоставляются скан-копии следующих документов:
+ паспорт (свидетельства) оборудования, машин и механизмов или договор аренды.
+Участник имеет право использовать аналогичные  виды оборудования, машин, механизмов для выполнения работ/оказания услуг, по характеристикам не уступающим установленных заказчиком.</p></td>
+                                                                               </tr>
+                                                                               <tr>
+                                                                                              <td class="snum"><p class="MsoNormal">6.</p></td>
+                                                                                              <td><p class="MsoNormal">Наличие опыта выполнения аналогичных работ</p></td>
+                                                                                              <td>
+                                                                                                                                              <p class="MsoNormal">Регистрация компании не менее 2 лет и наличие 1-4 договоров на аналогичные работы с актированием выполненных работ на общую сумму не менее 50% от суммы предложения за последние два года</p>
+</td>
+                                                                                              <td><p class="MsoNormal">Справка по форме (приложение 3.3) за подписью руководителя организации. 
+По запросу Заказчика предоставляются скан-копии договоров подряда, акты выполненных работ (КС-2 и т.п.)</p></td>
+                                                                               </tr>
+                                                                               <tr>
+                                                                                              <td class="snum"><p class="MsoNormal">7.</p></td>
+                                                                                              <td><p class="MsoNormal">Наличие офисных помещений</p></td>
+                                                                                              <td>
+                                                                                                                                              <p class="MsoNormal">Подтверждение о наличии офисных помещений</p>
+</td>
+                                                                                              <td><p class="MsoNormal">Скан-копия свидетельства о праве собственности, договор аренды</p></td>
+                                                                               </tr>
+                                                                               <tr>
+                                                                                              <td class="snum"><p class="MsoNormal">8.</p></td>
+                                                                                              <td><p class="MsoNormal">Наличие производственных баз/крытых складских помещений/цехов/участков  (указана минимальная площадь)</p></td>
+                                                                                              <td>
+                                                                                                                                              <p class="MsoNormal">Подтверждение о наличии производственных баз/крытых складских помещений/цехов/участков</p>
+</td>
+                                                                                              <td><p class="MsoNormal">Скан-копия свидетельства о праве собственности, договор аренды</p></td>
+                                                                               </tr>
+                                                                               <tr>
+                                                                                              <td class="snum"><p class="MsoNormal">9.</p></td>
+                                                                                              <td><p class="MsoNormal">График производства работ</p></td>
+                                                                                              <td>
+                                                                                                                                              <p class="MsoNormal">Подтверждение готовности выполнить работы в  соответствии с графиком производства работ представленном в тендерной документации</p>
+</td>
+                                                                                              <td><p class="MsoNormal">График производства работ должен быть подписан руководителем организации/уполномоченным лицом Участника и скреплен оттиском печати (при наличии)</p></td>
+                                                                               </tr>
+                                                                               <tr>
+                                                                                              <td class="snum"><p class="MsoNormal">10.</p></td>
+                                                                                              <td><p class="MsoNormal">Предоставление актуальной выписки из сервиса оценки: ЮЛ - для юридических лиц;  ИП -  для индивидуальных предпринимателей</p></td>
+                                                                                              <td>
+                                                                                                                                              <p class="MsoNormal">Выписка со статусом «Соответствует» по критериям  1-го  этапа  оценки</p>
+</td>
+                                                                                              <td><p class="MsoNormal">Выписка из сервиса оценки юридических лиц / индивидуальных предпринимателей. Инструкция по получению выписки представлена в приложении 9. Регламентирующие документы.*</p></td>
+                                                                               </tr>
+                               </table>
+					<p class="bottomText">Компания, принимая участие в закупочной процедуре, гарантирует наличие у нее согласия субъектов персональных данных (сотрудников компании) на обработку персональных данных ПАО&nbsp;«Татнефть» им.&nbsp;В.Д.&nbsp;Шашина с целью прохождения процедуры оценки участника на соответствие критериям допуска при проведении закупок в соответствии со Стандартом организации ПАО&nbsp;«Татнефть» им.&nbsp;В.Д.&nbsp;Шашина «Закупки работ и услуг». Срок действия согласия на обработку и передачу персональных данных должен быть не менее срока действия Заявки на участие в конкурентном отборе, указанного в тендерной документации.</p>
+                                       <p class="bottomText">По запросу организатора закупочной процедуры, Участник обязуется предоставить в течение 5(пяти) рабочих дней с даты получения такого запроса, если не установлен иной срок, документы и информацию, подтверждающие принятие мер, направленных на обеспечение выполнения требований Федерального закона от 27.07.2006 № 152 - ФЗ «О персональных данных»</p>
+                                      <p class="bottomText">* В случае, если отклонение контрагента, имеющего статус  «Не  соответствует» по критериям  1-го  этапа  оценки  в выписке из  сервиса юридических  лиц  / индивидуальных предпринимателей либо актуальная выписка не представлена,  может  привести  к  закупке  работ ( услуг)  на  сумму, которая  превышает лимитную  стоимость,  то  решение  о выборе победителя и  заключения  договора  с  победителем   будет приниматься на уровне руководителя Заказчика.</p>
+				</div>
+</body>
+</html>
