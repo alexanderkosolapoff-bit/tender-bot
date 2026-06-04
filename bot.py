@@ -19,9 +19,9 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-CHOOSING_DIRECTION = 1
-ANSWERING_QUESTIONS = 2
-ASKING_CRITERIA = 3
+CHOOSING = 1
+ANSWERING = 2
+CRITERIA_Q = 3
 
 sessions: dict[int, TenderAgent] = {}
 
@@ -39,7 +39,7 @@ async def get_text(update: Update) -> str | None:
     return None
 
 
-def direction_keyboard():
+def direction_kb():
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("Клининговые услуги", callback_data="dir_cleaning")],
         [InlineKeyboardButton("IT-услуги", callback_data="dir_it")],
@@ -47,7 +47,7 @@ def direction_keyboard():
     ])
 
 
-def doc_type_keyboard():
+def doctype_kb():
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("Только ТЗ", callback_data="doc_tz_only")],
         [InlineKeyboardButton("Только критерии допуска", callback_data="doc_criteria_only")],
@@ -55,48 +55,56 @@ def doc_type_keyboard():
     ])
 
 
+async def send_question(msg, result: dict):
+    text = result["question"]
+    options = result.get("options", [])
+    if options:
+        kb = [[InlineKeyboardButton(o, callback_data=f"ans_{i}")] for i, o in enumerate(options)]
+        kb.append([InlineKeyboardButton("Ввести свой вариант", callback_data="ans_custom")])
+        await msg.reply_text(text, reply_markup=InlineKeyboardMarkup(kb))
+    else:
+        await msg.reply_text(text)
+
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    sessions.pop(user_id, None)
+    sessions.pop(update.effective_user.id, None)
+    context.user_data.clear()
     await update.message.reply_text(
         "Добро пожаловать!\n\n"
-        "Я помогу подготовить:\n"
-        "- Техническое задание (ТЗ)\n"
-        "- Критерии допуска к закупке\n\n"
+        "Я помогу подготовить Техническое задание и Критерии допуска для тендера.\n\n"
         "Напишите запрос текстом или голосом, например:\n"
-        "\"Нужно ТЗ на клининговые услуги\"\n\n"
-        "Или нажмите /new чтобы начать пошагово."
+        "«Нужно ТЗ на клининговые услуги»\n\n"
+        "Или нажмите /new для пошагового выбора."
     )
     return ConversationHandler.END
 
 
 async def new_request(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    sessions.pop(user_id, None)
+    sessions.pop(update.effective_user.id, None)
     context.user_data.clear()
-    await update.message.reply_text("Выберите направление закупки:", reply_markup=direction_keyboard())
-    return CHOOSING_DIRECTION
+    await update.message.reply_text("Выберите направление закупки:", reply_markup=direction_kb())
+    return CHOOSING
 
 
-async def free_text_entry(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def initial_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обрабатывает первое свободное сообщение — определяет направление из текста."""
     text = await get_text(update)
     if not text:
         await update.message.reply_text("Пожалуйста, отправьте текст или голосовое сообщение.")
-        return CHOOSING_DIRECTION
+        return CHOOSING
 
     context.user_data["initial_request"] = text
     tl = text.lower()
 
     if any(w in tl for w in ["клининг", "уборк", "чистот"]):
         context.user_data["direction"] = "cleaning"
-    elif any(w in tl for w in ["it", " ит ", "информацион", "программ", "компьютер", "сервер"]):
+    elif any(w in tl for w in [" it", "ит", "информацион", "программ", "компьютер", "сервер"]):
         context.user_data["direction"] = "it"
     elif any(w in tl for w in ["ремонт", "обслуживан", "оборудован"]):
         context.user_data["direction"] = "repair"
 
     need_tz = any(w in tl for w in ["тз", "техническое задание"])
     need_cr = any(w in tl for w in ["критери", "допуск"])
-
     if need_tz and need_cr:
         context.user_data["doc_type"] = "both"
     elif need_cr and not need_tz:
@@ -104,128 +112,118 @@ async def free_text_entry(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         context.user_data["doc_type"] = "tz_only"
 
-    if "direction" in context.user_data:
-        if "doc_type" not in context.user_data:
-            await update.message.reply_text("Что нужно подготовить?", reply_markup=doc_type_keyboard())
-            return CHOOSING_DIRECTION
-        return await start_questions(update, context)
-    else:
-        await update.message.reply_text("Уточните направление закупки:", reply_markup=direction_keyboard())
-        return CHOOSING_DIRECTION
+    if "direction" not in context.user_data:
+        await update.message.reply_text("Уточните направление закупки:", reply_markup=direction_kb())
+        return CHOOSING
 
-
-async def direction_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    context.user_data["direction"] = query.data.replace("dir_", "")
     if "doc_type" not in context.user_data:
-        await query.edit_message_text("Что нужно подготовить?", reply_markup=doc_type_keyboard())
-        return CHOOSING_DIRECTION
-    return await start_questions(update, context, from_callback=True)
+        await update.message.reply_text("Что нужно подготовить?", reply_markup=doctype_kb())
+        return CHOOSING
+
+    return await begin_questions(update, context)
 
 
-async def doc_type_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    context.user_data["doc_type"] = query.data.replace("doc_", "")
-    return await start_questions(update, context, from_callback=True)
+async def cb_direction(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query
+    await q.answer()
+    context.user_data["direction"] = q.data.replace("dir_", "")
+    if "doc_type" not in context.user_data:
+        await q.edit_message_text("Что нужно подготовить?", reply_markup=doctype_kb())
+        return CHOOSING
+    return await begin_questions(update, context, from_cb=True)
 
 
-async def start_questions(update: Update, context: ContextTypes.DEFAULT_TYPE, from_callback=False):
-    user_id = update.effective_user.id
-    direction = context.user_data.get("direction", "cleaning")
-    doc_type = context.user_data.get("doc_type", "tz_only")
-    initial = context.user_data.get("initial_request", "")
+async def cb_doctype(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query
+    await q.answer()
+    context.user_data["doc_type"] = q.data.replace("doc_", "")
+    return await begin_questions(update, context, from_cb=True)
 
-    agent = TenderAgent(direction=direction, doc_type=doc_type)
-    sessions[user_id] = agent
 
-    result = await agent.get_next_question(initial_context=initial)
-    msg = update.callback_query.message if from_callback else update.message
+async def begin_questions(update: Update, context: ContextTypes.DEFAULT_TYPE, from_cb=False):
+    uid = update.effective_user.id
+    agent = TenderAgent(
+        direction=context.user_data.get("direction", "cleaning"),
+        doc_type=context.user_data.get("doc_type", "tz_only"),
+    )
+    sessions[uid] = agent
+    result = await agent.get_next_question(initial_context=context.user_data.get("initial_request", ""))
+    msg = update.callback_query.message if from_cb else update.message
     await send_question(msg, result)
-    return ANSWERING_QUESTIONS
+    return ANSWERING
 
 
-async def send_question(msg, result: dict):
-    text = result["question"]
-    options = result.get("options", [])
-    if options:
-        keyboard = [[InlineKeyboardButton(opt, callback_data=f"ans_{i}")] for i, opt in enumerate(options)]
-        keyboard.append([InlineKeyboardButton("Ввести свой вариант", callback_data="ans_custom")])
-        await msg.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
-    else:
-        await msg.reply_text(text)
-
-
-async def answer_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    user_id = update.effective_user.id
-    agent = sessions.get(user_id)
+async def cb_answer(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Нажали кнопку с вариантом ответа."""
+    q = update.callback_query
+    await q.answer()
+    uid = update.effective_user.id
+    agent = sessions.get(uid)
     if not agent:
-        await query.edit_message_text("Сессия устарела. Начните заново с /new")
+        await q.edit_message_text("Сессия устарела. Начните заново с /new")
         return ConversationHandler.END
 
-    if query.data == "ans_custom":
-        await query.edit_message_text(query.message.text + "\n\nВведите ваш вариант ответа:")
-        return ANSWERING_QUESTIONS
+    if q.data == "ans_custom":
+        await q.edit_message_text(q.message.text + "\n\nВведите ваш вариант:")
+        return ANSWERING
 
-    idx = int(query.data.replace("ans_", ""))
+    idx = int(q.data.replace("ans_", ""))
     options = agent.last_question.get("options", [])
-    answer_text = options[idx] if idx < len(options) else ""
-    await query.edit_message_text(f"{agent.last_question['question']}\n-> {answer_text}")
-    return await process_answer(update, context, answer_text)
+    answer = options[idx] if idx < len(options) else ""
+    await q.edit_message_text(f"{agent.last_question['question']}\n→ {answer}")
+    return await handle_answer(update, context, answer)
 
 
-async def answer_text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    agent = sessions.get(user_id)
+async def text_answer(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Пользователь напечатал или надиктовал ответ."""
+    uid = update.effective_user.id
+    agent = sessions.get(uid)
     if not agent:
         await update.message.reply_text("Сессия устарела. Начните заново с /new")
         return ConversationHandler.END
     text = await get_text(update)
     if not text:
         await update.message.reply_text("Пожалуйста, отправьте текст или голосовое сообщение.")
-        return ANSWERING_QUESTIONS
-    return await process_answer(update, context, text)
+        return ANSWERING
+    return await handle_answer(update, context, text)
 
 
-async def process_answer(update: Update, context: ContextTypes.DEFAULT_TYPE, answer: str):
-    user_id = update.effective_user.id
-    agent = sessions[user_id]
+async def handle_answer(update: Update, context: ContextTypes.DEFAULT_TYPE, answer: str):
+    uid = update.effective_user.id
+    agent = sessions[uid]
     result = await agent.submit_answer(answer)
-
     msg = update.callback_query.message if update.callback_query else update.message
 
     if result["status"] == "question":
         await send_question(msg, result)
-        return ANSWERING_QUESTIONS
+        return ANSWERING
     else:
         await msg.reply_text("Все данные собраны. Генерирую документ(ы)...")
-        return await generate_and_send(update, context)
+        return await do_generate(update, context)
 
 
-async def generate_and_send(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def do_generate(update: Update, context: ContextTypes.DEFAULT_TYPE):
     from docx_generator import generate_tz_docx, generate_criteria_docx
-
-    user_id = update.effective_user.id
-    agent = sessions[user_id]
+    uid = update.effective_user.id
+    agent = sessions[uid]
     msg = update.callback_query.message if update.callback_query else update.message
 
     try:
         if agent.doc_type in ("tz_only", "both"):
-            tz_content = await agent.generate_tz()
-            path = await generate_tz_docx(tz_content, agent.tender_name)
+            content = await agent.generate_tz()
+            path = await generate_tz_docx(content, agent.tender_name)
             with open(path, "rb") as f:
-                await msg.reply_document(document=f, filename=f"ТЗ_{agent.tender_name[:40]}.docx",
+                await msg.reply_document(document=f,
+                                         filename=f"ТЗ_{agent.tender_name[:40]}.docx",
                                          caption="Техническое задание готово!")
             os.remove(path)
 
         if agent.doc_type in ("criteria_only", "both"):
-            cr_content = await agent.generate_criteria()
-            path = await generate_criteria_docx(cr_content, agent.tender_name)
+            content = await agent.generate_criteria()
+            path = await generate_criteria_docx(content, agent.tender_name)
             with open(path, "rb") as f:
-                await msg.reply_document(document=f, filename=f"Критерии_{agent.tender_name[:35]}.docx",
+                await msg.reply_document(document=f,
+                                         filename=f"Критерии_{agent.tender_name[:35]}.docx",
                                          caption="Критерии допуска готовы!")
             os.remove(path)
 
@@ -235,53 +233,54 @@ async def generate_and_send(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 [InlineKeyboardButton("Нет, спасибо", callback_data="no_criteria")],
             ])
             await msg.reply_text("Нужны ли критерии допуска для этой закупки?", reply_markup=kb)
-            return ASKING_CRITERIA
+            return CRITERIA_Q
 
     except Exception as e:
         logger.error(f"Ошибка генерации: {e}", exc_info=True)
-        await msg.reply_text("Произошла ошибка при создании файла. Попробуйте /new")
+        await msg.reply_text("Произошла ошибка. Попробуйте /new")
 
-    sessions.pop(user_id, None)
+    sessions.pop(uid, None)
     await msg.reply_text("Для нового запроса нажмите /new")
     return ConversationHandler.END
 
 
-async def criteria_decision(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def cb_criteria(update: Update, context: ContextTypes.DEFAULT_TYPE):
     from docx_generator import generate_criteria_docx
-    query = update.callback_query
-    await query.answer()
-    user_id = update.effective_user.id
+    q = update.callback_query
+    await q.answer()
+    uid = update.effective_user.id
 
-    if query.data == "no_criteria":
-        await query.edit_message_text("Хорошо! Для нового запроса нажмите /new")
-        sessions.pop(user_id, None)
+    if q.data == "no_criteria":
+        await q.edit_message_text("Хорошо! Для нового запроса нажмите /new")
+        sessions.pop(uid, None)
         return ConversationHandler.END
 
-    agent = sessions.get(user_id)
+    agent = sessions.get(uid)
     if not agent:
-        await query.edit_message_text("Сессия устарела. Начните заново с /new")
+        await q.edit_message_text("Сессия устарела. Начните заново с /new")
         return ConversationHandler.END
 
-    await query.edit_message_text("Генерирую критерии допуска...")
+    await q.edit_message_text("Генерирую критерии допуска...")
     try:
-        cr_content = await agent.generate_criteria()
-        path = await generate_criteria_docx(cr_content, agent.tender_name)
+        content = await agent.generate_criteria()
+        path = await generate_criteria_docx(content, agent.tender_name)
         with open(path, "rb") as f:
-            await query.message.reply_document(document=f,
-                                               filename=f"Критерии_{agent.tender_name[:35]}.docx",
-                                               caption="Критерии допуска готовы!")
+            await q.message.reply_document(document=f,
+                                           filename=f"Критерии_{agent.tender_name[:35]}.docx",
+                                           caption="Критерии допуска готовы!")
         os.remove(path)
     except Exception as e:
         logger.error(f"Ошибка: {e}", exc_info=True)
-        await query.message.reply_text("Ошибка при создании файла. Попробуйте /new")
+        await q.message.reply_text("Ошибка при создании файла. Попробуйте /new")
 
-    sessions.pop(user_id, None)
-    await query.message.reply_text("Для нового запроса нажмите /new")
+    sessions.pop(uid, None)
+    await q.message.reply_text("Для нового запроса нажмите /new")
     return ConversationHandler.END
 
 
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     sessions.pop(update.effective_user.id, None)
+    context.user_data.clear()
     await update.message.reply_text("Отменено. Нажмите /new для нового запроса.")
     return ConversationHandler.END
 
@@ -291,19 +290,22 @@ def main():
     tv = (filters.TEXT | filters.VOICE) & ~filters.COMMAND
 
     conv = ConversationHandler(
-        entry_points=[CommandHandler("new", new_request), MessageHandler(tv, free_text_entry)],
+        entry_points=[
+            CommandHandler("new", new_request),
+            MessageHandler(tv, initial_message),
+        ],
         states={
-            CHOOSING_DIRECTION: [
-                CallbackQueryHandler(direction_chosen, pattern="^dir_"),
-                CallbackQueryHandler(doc_type_chosen, pattern="^doc_"),
-                MessageHandler(tv, free_text_entry),
+            CHOOSING: [
+                CallbackQueryHandler(cb_direction, pattern="^dir_"),
+                CallbackQueryHandler(cb_doctype, pattern="^doc_"),
+                MessageHandler(tv, initial_message),
             ],
-            ANSWERING_QUESTIONS: [
-                CallbackQueryHandler(answer_button, pattern="^ans_"),
-                MessageHandler(tv, answer_text_handler),
+            ANSWERING: [
+                CallbackQueryHandler(cb_answer, pattern="^ans_"),
+                MessageHandler(tv, text_answer),   # <-- только здесь ловим текст в режиме ответов
             ],
-            ASKING_CRITERIA: [
-                CallbackQueryHandler(criteria_decision, pattern="^(yes|no)_criteria$"),
+            CRITERIA_Q: [
+                CallbackQueryHandler(cb_criteria, pattern="^(yes|no)_criteria$"),
             ],
         },
         fallbacks=[CommandHandler("cancel", cancel)],
