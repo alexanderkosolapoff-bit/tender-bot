@@ -1,6 +1,5 @@
 """
 Telegram-бот для генерации ТЗ и критериев допуска.
-Поддерживает голос и текст. Вопросы задаются кнопками.
 """
 
 import os
@@ -72,11 +71,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "Добро пожаловать!\n\n"
         "Я помогу подготовить Техническое задание и Критерии допуска для тендера.\n\n"
-        "Напишите запрос текстом или голосом, например:\n"
-        "«Нужно ТЗ на клининговые услуги»\n\n"
-        "Или нажмите /new для пошагового выбора."
+        "Нажмите /new чтобы начать."
     )
-    return ConversationHandler.END
 
 
 async def new_request(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -84,43 +80,6 @@ async def new_request(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data.clear()
     await update.message.reply_text("Выберите направление закупки:", reply_markup=direction_kb())
     return CHOOSING
-
-
-async def initial_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обрабатывает первое свободное сообщение — определяет направление из текста."""
-    text = await get_text(update)
-    if not text:
-        await update.message.reply_text("Пожалуйста, отправьте текст или голосовое сообщение.")
-        return CHOOSING
-
-    context.user_data["initial_request"] = text
-    tl = text.lower()
-
-    if any(w in tl for w in ["клининг", "уборк", "чистот"]):
-        context.user_data["direction"] = "cleaning"
-    elif any(w in tl for w in [" it", "ит", "информацион", "программ", "компьютер", "сервер"]):
-        context.user_data["direction"] = "it"
-    elif any(w in tl for w in ["ремонт", "обслуживан", "оборудован"]):
-        context.user_data["direction"] = "repair"
-
-    need_tz = any(w in tl for w in ["тз", "техническое задание"])
-    need_cr = any(w in tl for w in ["критери", "допуск"])
-    if need_tz and need_cr:
-        context.user_data["doc_type"] = "both"
-    elif need_cr and not need_tz:
-        context.user_data["doc_type"] = "criteria_only"
-    else:
-        context.user_data["doc_type"] = "tz_only"
-
-    if "direction" not in context.user_data:
-        await update.message.reply_text("Уточните направление закупки:", reply_markup=direction_kb())
-        return CHOOSING
-
-    if "doc_type" not in context.user_data:
-        await update.message.reply_text("Что нужно подготовить?", reply_markup=doctype_kb())
-        return CHOOSING
-
-    return await begin_questions(update, context)
 
 
 async def cb_direction(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -147,14 +106,13 @@ async def begin_questions(update: Update, context: ContextTypes.DEFAULT_TYPE, fr
         doc_type=context.user_data.get("doc_type", "tz_only"),
     )
     sessions[uid] = agent
-    result = await agent.get_next_question(initial_context=context.user_data.get("initial_request", ""))
+    result = await agent.get_next_question()
     msg = update.callback_query.message if from_cb else update.message
     await send_question(msg, result)
     return ANSWERING
 
 
 async def cb_answer(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Нажали кнопку с вариантом ответа."""
     q = update.callback_query
     await q.answer()
     uid = update.effective_user.id
@@ -175,7 +133,6 @@ async def cb_answer(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def text_answer(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Пользователь напечатал или надиктовал ответ."""
     uid = update.effective_user.id
     agent = sessions.get(uid)
     if not agent:
@@ -292,17 +249,15 @@ def main():
     conv = ConversationHandler(
         entry_points=[
             CommandHandler("new", new_request),
-            MessageHandler(tv, initial_message),
         ],
         states={
             CHOOSING: [
                 CallbackQueryHandler(cb_direction, pattern="^dir_"),
                 CallbackQueryHandler(cb_doctype, pattern="^doc_"),
-                MessageHandler(tv, initial_message),
             ],
             ANSWERING: [
                 CallbackQueryHandler(cb_answer, pattern="^ans_"),
-                MessageHandler(tv, text_answer),   # <-- только здесь ловим текст в режиме ответов
+                MessageHandler(tv, text_answer),
             ],
             CRITERIA_Q: [
                 CallbackQueryHandler(cb_criteria, pattern="^(yes|no)_criteria$"),
