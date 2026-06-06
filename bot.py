@@ -8,7 +8,7 @@ import logging
 import base64
 import tempfile
 import anthropic
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton
 from telegram.ext import (
     Application, CommandHandler, MessageHandler,
     CallbackQueryHandler, filters, ContextTypes, ConversationHandler,
@@ -44,6 +44,15 @@ if ALLOWED_USERS_ENV:
             ALLOWED_USERS.add(int(uid_str.strip()))
         except ValueError:
             pass
+
+
+def main_keyboard():
+    """Постоянная клавиатура внизу — всегда видна пользователю."""
+    return ReplyKeyboardMarkup(
+        [[KeyboardButton("🆕 Новый запрос"), KeyboardButton("❓ Помощь")]],
+        resize_keyboard=True,
+        is_persistent=True,
+    )
 
 
 def save_user(user_id: int, username: str = ""):
@@ -365,13 +374,14 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "О, живой! Привет 😄\n\n"
         "Я Макс — твой личный помощник по тендерам. Вот что умею:\n\n"
-        "📄 ТЗ, критерии, сценарии переговоров → /new\n"
+        "📄 ТЗ, критерии, сценарии переговоров\n"
         "💬 Отвечу на любой вопрос\n"
         "🔍 Найду информацию в интернете\n"
         "📷 Распознаю текст с фото\n"
         "✉️ Составлю ответное письмо\n"
-        "📝 Сохраню любое моё сообщение в Word или PDF\n\n"
-        "Или просто напиши что нужно 😏"
+        "📝 Сохраню любое сообщение в Word или PDF\n\n"
+        "Кнопка «🆕 Новый запрос» внизу — для создания документов 😏",
+        reply_markup=main_keyboard()
     )
 
 
@@ -889,7 +899,8 @@ async def cb_review(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await q.answer()
     uid = update.effective_user.id
     if q.data == "review_ok":
-        await q.edit_message_text("Значит не зря старался 😄 → /new")
+        await q.edit_message_text("Значит не зря старался 😄")
+        await q.message.reply_text("Для нового запроса нажми кнопку внизу 👇", reply_markup=main_keyboard())
         sessions.pop(uid, None)
         last_doc.pop(uid, None)
         return ConversationHandler.END
@@ -975,6 +986,28 @@ async def chat_reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     tl = text.lower()
+
+    # Кнопки постоянной клавиатуры
+    if text == "🆕 Новый запрос":
+        sessions.pop(uid, None)
+        context.user_data.clear()
+        await update.message.reply_text("Ладно, что делаем? 😄", reply_markup=main_menu_kb())
+        return
+
+    if text == "❓ Помощь":
+        await update.message.reply_text(
+            "Вот что я умею 😄\n\n"
+            "🆕 *Новый запрос* — создать ТЗ, критерии или сценарий переговоров\n"
+            "💬 Просто напиши вопрос — отвечу\n"
+            "🔍 Ищу в интернете по запросу\n"
+            "📷 Отправь фото — опишу и найду инфу\n"
+            "✉️ Распознаю письмо с фото и составлю ответ\n"
+            "📝 Скажи «сохрани» — сохраню последний ответ в Word или PDF\n"
+            "📎 При создании документа можно загрузить файл заказчика — задам только недостающие вопросы",
+            reply_markup=main_keyboard()
+        )
+        return
+
     if any(w in tl for w in ["сохрани", "в ворд", "в pdf", "сделай файл", "скачать"]):
         await save_to_word_any(update, context)
         return
@@ -1157,7 +1190,7 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     sessions.pop(uid, None)
     last_doc.pop(uid, None)
     context.user_data.clear()
-    await update.message.reply_text("Отменено 👌 Пиши если что!")
+    await update.message.reply_text("Отменено 👌 Пиши если что!", reply_markup=main_keyboard())
     return ConversationHandler.END
 
 
