@@ -45,6 +45,29 @@ if ALLOWED_USERS_ENV:
         except ValueError:
             pass
 
+# Динамически добавленные пользователи (через /adduser) — хранятся в файле
+DYNAMIC_USERS_FILE = "/tmp/dynamic_users.json"
+
+def load_dynamic_users() -> set[int]:
+    try:
+        if os.path.exists(DYNAMIC_USERS_FILE):
+            with open(DYNAMIC_USERS_FILE) as f:
+                data = json.load(f)
+                return set(data.get("users", []))
+    except Exception:
+        pass
+    return set()
+
+def save_dynamic_users(users: set[int]):
+    try:
+        with open(DYNAMIC_USERS_FILE, "w") as f:
+            json.dump({"users": list(users)}, f)
+    except Exception as e:
+        logger.error(f"Ошибка сохранения dynamic_users: {e}")
+
+# Загружаем динамических пользователей при старте
+DYNAMIC_USERS: set[int] = load_dynamic_users()
+
 
 def main_keyboard():
     """Постоянная клавиатура внизу — всегда видна пользователю."""
@@ -79,9 +102,10 @@ def get_all_users() -> dict:
 
 
 def is_allowed(user_id: int) -> bool:
-    if not ALLOWED_USERS:
+    # Если белый список пустой — пускаем всех
+    if not ALLOWED_USERS and not DYNAMIC_USERS:
         return True
-    return user_id in ALLOWED_USERS
+    return user_id in ALLOWED_USERS or user_id in DYNAMIC_USERS
 
 
 def remember_bot_message(uid: int, text: str):
@@ -1163,6 +1187,116 @@ async def generate_letter_reply(update: Update, context: ContextTypes.DEFAULT_TY
         await update.message.reply_text("Не смог составить 😕")
 
 
+async def cmd_users(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Команда /users — показывает всех пользователей бота (только для админа)."""
+    uid = update.effective_user.id
+    admin_id = int(os.environ.get("ADMIN_ID", "0"))
+    if uid != admin_id:
+        await update.message.reply_text("⛔ Только для администратора.")
+        return
+
+    all_users = get_all_users()  # Все кто писал боту (из /tmp)
+    whitelist = ALLOWED_USERS | DYNAMIC_USERS
+
+    lines = ["👥 *Все пользователи бота:*
+"]
+    if not all_users:
+        lines.append("Пока никто не писал боту (или список сбросился после перезапуска).")
+    else:
+        for user_id_str, username in all_users.items():
+            uid_int = int(user_id_str)
+            status = "✅" if uid_int in whitelist else "🔒"
+            name = f"@{username}" if username else "без username"
+            lines.append(f"{status} {uid_int} — {name}")
+
+    lines.append(f"
+📋 *В белом списке:* {len(whitelist)} чел.")
+    lines.append("
+✅ — есть доступ
+🔒 — нет доступа")
+    lines.append("
+Чтобы добавить: `/adduser ID`")
+    lines.append("Чтобы убрать: `/removeuser ID`")
+
+    await update.message.reply_text("
+".join(lines), parse_mode="Markdown")
+
+
+async def cmd_adduser(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Команда /adduser ID — добавляет пользователя в белый список."""
+    uid = update.effective_user.id
+    admin_id = int(os.environ.get("ADMIN_ID", "0"))
+    if uid != admin_id:
+        await update.message.reply_text("⛔ Только для администратора.")
+        return
+
+    if not context.args:
+        await update.message.reply_text(
+            "Укажи Telegram ID пользователя:
+`/adduser 123456789`",
+            parse_mode="Markdown"
+        )
+        return
+
+    try:
+        new_uid = int(context.args[0])
+    except ValueError:
+        await update.message.reply_text("❌ Неверный ID. Должно быть число, например: `/adduser 123456789`", parse_mode="Markdown")
+        return
+
+    DYNAMIC_USERS.add(new_uid)
+    save_dynamic_users(DYNAMIC_USERS)
+
+    # Пробуем уведомить пользователя
+    try:
+        await context.bot.send_message(
+            chat_id=new_uid,
+            text="✅ Тебе открыт доступ к боту! Напиши /start чтобы начать 😄"
+        )
+        notified = "Пользователь уведомлён."
+    except Exception:
+        notified = "Не смог уведомить (пользователь не писал боту)."
+
+    await update.message.reply_text(
+        f"✅ Пользователь `{new_uid}` добавлен в белый список.
+{notified}",
+        parse_mode="Markdown"
+    )
+
+
+async def cmd_removeuser(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Команда /removeuser ID — убирает пользователя из белого списка."""
+    uid = update.effective_user.id
+    admin_id = int(os.environ.get("ADMIN_ID", "0"))
+    if uid != admin_id:
+        await update.message.reply_text("⛔ Только для администратора.")
+        return
+
+    if not context.args:
+        await update.message.reply_text("Укажи ID:
+`/removeuser 123456789`", parse_mode="Markdown")
+        return
+
+    try:
+        rem_uid = int(context.args[0])
+    except ValueError:
+        await update.message.reply_text("❌ Неверный ID.")
+        return
+
+    if rem_uid in DYNAMIC_USERS:
+        DYNAMIC_USERS.discard(rem_uid)
+        save_dynamic_users(DYNAMIC_USERS)
+        await update.message.reply_text(f"✅ Пользователь `{rem_uid}` удалён из белого списка.", parse_mode="Markdown")
+    elif rem_uid in ALLOWED_USERS:
+        await update.message.reply_text(
+            f"⚠️ Пользователь `{rem_uid}` добавлен через переменную ALLOWED_USERS на Railway — "
+            f"удали его оттуда вручную в настройках Railway.",
+            parse_mode="Markdown"
+        )
+    else:
+        await update.message.reply_text(f"Пользователь `{rem_uid}` не найден в белом списке.", parse_mode="Markdown")
+
+
 async def broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
     admin_id = int(os.environ.get("ADMIN_ID", "0"))
@@ -1242,6 +1376,9 @@ def main():
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("broadcast", broadcast))
+    app.add_handler(CommandHandler("users", cmd_users))
+    app.add_handler(CommandHandler("adduser", cmd_adduser))
+    app.add_handler(CommandHandler("removeuser", cmd_removeuser))
     app.add_handler(conv)
     app.add_handler(MessageHandler(photo_f, chat_reply))
     app.add_handler(CallbackQueryHandler(cb_photo_actions, pattern="^write_reply$"))
