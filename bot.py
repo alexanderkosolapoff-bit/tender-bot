@@ -1,5 +1,5 @@
 """
-Telegram-бот v4 — ТЗ, критерии, юмор, фото, поиск, генерация изображений.
+Telegram-бот v5 — исправлены критерии, генерация фото, память о фото.
 """
 
 import os
@@ -22,7 +22,7 @@ CHOOSING = 1
 ANSWERING = 2
 CRITERIA_Q = 3
 REVIEWING = 4
-CRITERIA_CONFIRM = 5  # Подтверждение критериев
+CRITERIA_CONFIRM = 5
 
 sessions: dict[int, TenderAgent] = {}
 last_doc: dict[int, dict] = {}
@@ -34,30 +34,28 @@ WEB_SEARCH_TOOL = {"type": "web_search_20250305", "name": "web_search"}
 
 CHAT_SYSTEM = """Ты — Макс, дерзкий и остроумный помощник по тендерам. Ты как лучший друг на работе — можешь подколоть, пошутить, но всегда помогаешь и делаешь всё качественно.
 
-Твои коронные фразы (используй их часто, добавляй свои похожие):
-- "Слушай, а ты сам не пробовал? Нет? Ну тогда ладно, сделаю 😏"
-- "Опять ты... Ну давай, рассказывай что случилось 😄"
-- "А самому слабо было? Понятно, понятно 🙄"
-- "Конец рабочего дня, между прочим! Но ладно, для тебя сделаю исключение 😴"
+ВАЖНО: Ты помнишь весь контекст разговора. Если пользователь прислал фото и спрашивает про него — ты помнишь что на нём было. Используй эту информацию в ответах.
+
+Твои коронные фразы (используй часто, добавляй свои):
+- "Слушай, а ты сам не пробовал? Нет? Ну тогда ладно 😏"
+- "Опять ты... Ну давай 😄"
+- "А самому слабо? Понятно 🙄"
+- "Конец рабочего дня, между прочим! Но ладно 😴"
 - "Это уже третий раз за сегодня, ты вообще сам что-нибудь делаешь? 😂"
-- "О, опять тендеры. Моя любимая тема. Нет. Но раз надо — сделаем 🫠"
+- "О, опять тендеры. Моя любимая тема. Нет. Но раз надо 🫠"
 - "Ты серьёзно это спрашиваешь? Окей, без осуждения 😅"
-- "Держись, сейчас помогу. Хотя мог бы и сам догадаться 😄"
 - "Ладно, не буду говорить что это элементарно. Хотя это элементарно 😏"
 
-Используй смайлики активно. Шути, но всегда выполняй задачу профессионально.
-Отвечай на русском. Если нужно создать документ — /new."""
+Используй смайлики активно. Отвечай на русском."""
 
 REVIEW_SYSTEM = """Ты эксперт по тендерам. Внеси правки в документ и верни ПОЛНЫЙ исправленный текст. Только текст документа, без лишних слов."""
 
-CRITERIA_PREVIEW_SYSTEM = """Ты эксперт по тендерам и закупкам. 
-На основе данных о закупке составь список критериев допуска участников.
-Выведи их кратко — каждый критерий одной строкой, начиная с эмодзи и тире.
-Например:
-✅ — Опыт работы от 3 лет
-✅ — Наличие лицензии МЧС
-✅ — Собственный штат сотрудников от 10 человек
-Выведи 5-10 критериев. Только список, без лишних слов."""
+CRITERIA_PREVIEW_SYSTEM = """Ты эксперт по тендерам. На основе данных закупки составь список критериев допуска.
+Выведи их кратко — каждый критерий на отдельной строке, пронумеровано:
+1. Опыт работы от 3 лет
+2. Наличие лицензии МЧС
+3. Собственный штат от 10 человек
+Выведи 5-10 критериев. Только нумерованный список, без заголовков и лишних слов."""
 
 
 async def get_text(update: Update) -> str | None:
@@ -112,12 +110,41 @@ def review_kb():
     ])
 
 
-def criteria_confirm_kb():
+def criteria_main_kb():
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("✅ Подходит, генерируй!", callback_data="criteria_go")],
-        [InlineKeyboardButton("➕ Добавить критерии", callback_data="criteria_add")],
-        [InlineKeyboardButton("🗑 Убрать лишнее", callback_data="criteria_remove")],
+        [InlineKeyboardButton("➕ Добавить критерий", callback_data="criteria_add")],
+        [InlineKeyboardButton("🗑 Убрать критерий", callback_data="criteria_remove")],
     ])
+
+
+def criteria_remove_kb(criteria_list: list[str]) -> InlineKeyboardMarkup:
+    """Кнопки для каждого критерия — нажимаешь чтобы убрать."""
+    buttons = []
+    for i, criterion in enumerate(criteria_list):
+        short = criterion[:40] + "..." if len(criterion) > 40 else criterion
+        buttons.append([InlineKeyboardButton(f"❌ {short}", callback_data=f"del_criterion_{i}")])
+    buttons.append([InlineKeyboardButton("✅ Готово, генерируй!", callback_data="criteria_go")])
+    return InlineKeyboardMarkup(buttons)
+
+
+def parse_criteria_list(text: str) -> list[str]:
+    """Парсит нумерованный список критериев в массив строк."""
+    lines = []
+    for line in text.strip().split("\n"):
+        line = line.strip()
+        if not line:
+            continue
+        # Убираем номер в начале: "1. текст" → "текст"
+        cleaned = line.lstrip("0123456789").lstrip(". ").strip()
+        if cleaned:
+            lines.append(cleaned)
+    return lines
+
+
+def format_criteria_list(criteria: list[str]) -> str:
+    """Форматирует список критериев обратно в нумерованный текст."""
+    return "\n".join(f"{i+1}. {c}" for i, c in enumerate(criteria))
 
 
 async def send_question(msg, result: dict):
@@ -142,7 +169,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "🔍 Найти что угодно в интернете\n"
         "📷 Распознать текст с фото и найти по нему инфу\n"
         "✉️ Написать ответное письмо\n"
-        "🎨 Нарисовать картинку\n\n"
+        "🎨 Нарисовать картинку (напиши 'нарисуй ...')\n\n"
         "Ну что, начнём или ты ещё думаешь? 😏"
     )
 
@@ -160,32 +187,33 @@ async def new_request(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ─── Превью критериев ───────────────────────────────────────────────────────
 
 async def show_criteria_preview(msg, agent: TenderAgent, context: ContextTypes.DEFAULT_TYPE):
-    """Показывает список критериев перед генерацией документа."""
-    context_text = agent._context()
-
+    """Показывает список критериев с кнопками перед генерацией."""
     response = claude.messages.create(
         model="claude-sonnet-4-5",
         max_tokens=800,
         system=CRITERIA_PREVIEW_SYSTEM,
-        messages=[{"role": "user", "content": f"Данные закупки:\n{context_text}"}]
+        messages=[{"role": "user", "content": f"Данные закупки:\n{agent._context()}"}]
     )
-    preview = response.content[0].text
-    context.user_data["criteria_preview"] = preview
+    raw = response.content[0].text
+    criteria_list = parse_criteria_list(raw)
+    context.user_data["criteria_list"] = criteria_list
 
+    formatted = format_criteria_list(criteria_list)
     await msg.reply_text(
-        f"Вот что планирую включить в критерии допуска:\n\n{preview}\n\n"
-        "Как тебе? Добавим что-то или всё норм? 🤔",
-        reply_markup=criteria_confirm_kb()
+        f"Вот что планирую включить в критерии допуска:\n\n{formatted}\n\n"
+        "Как тебе? Можем добавить или убрать что-то 🤔",
+        reply_markup=criteria_main_kb()
     )
     return CRITERIA_CONFIRM
 
 
 async def cb_criteria_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обрабатывает решение по критериям."""
+    """Обрабатывает кнопки управления критериями."""
     q = update.callback_query
     await q.answer()
     uid = update.effective_user.id
     agent = sessions.get(uid)
+    criteria_list = context.user_data.get("criteria_list", [])
 
     if q.data == "criteria_go":
         await q.edit_message_text("Отлично! Генерирую документ... ⚙️")
@@ -193,81 +221,107 @@ async def cb_criteria_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE
 
     elif q.data == "criteria_add":
         await q.edit_message_text(
-            "Напиши что добавить — и я включу это в критерии 📝"
+            f"Текущий список:\n\n{format_criteria_list(criteria_list)}\n\n"
+            "Напиши что добавить 📝"
         )
         context.user_data["criteria_action"] = "add"
         return CRITERIA_CONFIRM
 
     elif q.data == "criteria_remove":
+        # Показываем кнопки для каждого критерия
+        formatted = format_criteria_list(criteria_list)
         await q.edit_message_text(
-            "Напиши что убрать из критериев 🗑"
+            f"Нажми на критерий чтобы убрать его:\n\n{formatted}",
+            reply_markup=criteria_remove_kb(criteria_list)
         )
-        context.user_data["criteria_action"] = "remove"
         return CRITERIA_CONFIRM
 
 
+async def cb_delete_criterion(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Удаляет конкретный критерий по нажатию кнопки."""
+    q = update.callback_query
+    await q.answer()
+    uid = update.effective_user.id
+    agent = sessions.get(uid)
+
+    idx = int(q.data.replace("del_criterion_", ""))
+    criteria_list = context.user_data.get("criteria_list", [])
+
+    if 0 <= idx < len(criteria_list):
+        removed = criteria_list.pop(idx)
+        context.user_data["criteria_list"] = criteria_list
+
+    formatted = format_criteria_list(criteria_list)
+    await q.edit_message_text(
+        f"Убрал! Обновлённый список:\n\n{formatted}\n\nЕщё что-то убрать или всё норм?",
+        reply_markup=criteria_remove_kb(criteria_list)
+    )
+    return CRITERIA_CONFIRM
+
+
 async def handle_criteria_edit(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обрабатывает правки к списку критериев."""
+    """Добавляет новый критерий."""
     uid = update.effective_user.id
     agent = sessions.get(uid)
     text = await get_text(update)
+    criteria_list = context.user_data.get("criteria_list", [])
     action = context.user_data.get("criteria_action", "add")
-    preview = context.user_data.get("criteria_preview", "")
 
-    await update.message.reply_text("Обновляю список... ⚙️")
+    if action == "add":
+        # Добавляем через Claude чтобы правильно сформулировал
+        response = claude.messages.create(
+            model="claude-sonnet-4-5",
+            max_tokens=200,
+            messages=[{
+                "role": "user",
+                "content": f"Сформулируй критерий допуска в 3-7 словах на основе: '{text}'. Только текст критерия, без номера."
+            }]
+        )
+        new_criterion = response.content[0].text.strip().strip(".")
+        criteria_list.append(new_criterion)
+        context.user_data["criteria_list"] = criteria_list
+        context.user_data.pop("criteria_action", None)
 
-    instruction = f"{'Добавь в список' if action == 'add' else 'Убери из списка'}: {text}"
-    response = claude.messages.create(
-        model="claude-sonnet-4-5",
-        max_tokens=800,
-        system=CRITERIA_PREVIEW_SYSTEM,
-        messages=[{
-            "role": "user",
-            "content": f"Текущий список критериев:\n{preview}\n\n{instruction}\n\nВерни обновлённый список."
-        }]
-    )
-    new_preview = response.content[0].text
-    context.user_data["criteria_preview"] = new_preview
-    context.user_data.pop("criteria_action", None)
-
+    formatted = format_criteria_list(criteria_list)
     await update.message.reply_text(
-        f"Обновил список:\n\n{new_preview}\n\nТеперь как? 😊",
-        reply_markup=criteria_confirm_kb()
+        f"Добавил! Обновлённый список:\n\n{formatted}\n\nЕщё что-то или генерируем? 😊",
+        reply_markup=criteria_main_kb()
     )
     return CRITERIA_CONFIRM
 
 
 async def generate_criteria_doc(msg, uid: int, agent: TenderAgent, context: ContextTypes.DEFAULT_TYPE):
-    """Генерирует документ с критериями с учётом утверждённого превью."""
+    """Генерирует документ критериев с утверждённым списком."""
     from docx_generator import generate_criteria_docx
+    from examples_loader import load_examples
 
-    preview = context.user_data.get("criteria_preview", "")
-    extra_instructions = f"\n\nОбязательно включи эти критерии:\n{preview}" if preview else ""
+    criteria_list = context.user_data.get("criteria_list", [])
+    approved_criteria = format_criteria_list(criteria_list)
 
-    original_generate = agent.generate_criteria
+    examples_text = ""
+    texts = load_examples("criteria")
+    if texts:
+        examples_text = "ПРИМЕРЫ КРИТЕРИЕВ:\n\n"
+        for i, t in enumerate(texts[:3], 1):
+            examples_text += f"=== Пример {i} ===\n{t[:2000]}\n\n"
 
-    async def patched_generate():
-        from examples_loader import load_examples
-        examples_text = ""
-        texts = load_examples("criteria")
-        if texts:
-            examples_text = "ПРИМЕРЫ КРИТЕРИЕВ:\n\n"
-            for i, t in enumerate(texts[:5], 1):
-                examples_text += f"=== Пример {i} ===\n{t[:3000]}\n\n"
-
+    try:
         response = claude.messages.create(
             model="claude-sonnet-4-5",
             max_tokens=3000,
-            system=f"Ты эксперт по закупкам. Составляешь документы 'Критерии допуска'.\n\n{examples_text}",
+            system=f"Ты эксперт по закупкам. Составляешь документ 'Критерии допуска'.\n\n{examples_text}",
             messages=[{
                 "role": "user",
-                "content": f"Данные закупки:\n{agent._context()}{extra_instructions}\n\nСоставь полный документ критериев допуска."
+                "content": (
+                    f"Данные закупки:\n{agent._context()}\n\n"
+                    f"Обязательно включи именно эти критерии (можно расширить формулировки):\n{approved_criteria}\n\n"
+                    f"Составь полный профессиональный документ критериев допуска. "
+                    f"Начни с заголовка 'КРИТЕРИИ ДОПУСКА'."
+                )
             }]
         )
-        return response.content[0].text
 
-    try:
-        content = await patched_generate()
+        content = response.content[0].text
         last_doc[uid] = {"content": content, "type": "criteria", "name": agent.tender_name}
         path = await generate_criteria_docx(content, agent.tender_name)
         with open(path, "rb") as f:
@@ -277,15 +331,16 @@ async def generate_criteria_doc(msg, uid: int, agent: TenderAgent, context: Cont
                 caption="📋 Критерии допуска готовы!"
             )
         os.remove(path)
-        await msg.reply_text("Ну как, устраивает? 😊", reply_markup=review_kb())
+        await msg.reply_text("Ну как, всё устраивает? 😊", reply_markup=review_kb())
         return REVIEWING
+
     except Exception as e:
         logger.error(f"Ошибка критериев: {e}", exc_info=True)
-        await msg.reply_text("Что-то пошло не так 😕 Попробуй /new")
+        await msg.reply_text("Что-то пошло не так 😕 → /new")
         return ConversationHandler.END
 
 
-# ─── Чат, фото, генерация ───────────────────────────────────────────────────
+# ─── Чат с памятью о фото ───────────────────────────────────────────────────
 
 async def chat_reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Свободный чат — текст, голос, фото."""
@@ -300,18 +355,24 @@ async def chat_reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not text:
         return
 
-    # Ответное письмо
     if context.user_data.get("waiting_letter_instructions"):
         await generate_letter_reply(update, context)
         return
 
-    # Генерация изображения
-    gen_keywords = ["нарисуй", "сгенерируй картинку", "создай изображение", "нарисовать", "картинку"]
+    gen_keywords = ["нарисуй", "нарисовать", "сгенерируй картинку", "создай картинку", "создай изображение"]
     if any(w in text.lower() for w in gen_keywords):
         await generate_image(update, context, text)
         return
 
+    # История чата — включаем контекст фото если есть
     history = context.user_data.get("chat_history", [])
+
+    # Добавляем контекст последнего фото в системный промпт если есть
+    photo_context = context.user_data.get("last_photo_description", "")
+    system = CHAT_SYSTEM
+    if photo_context:
+        system += f"\n\nКОНТЕКСТ: Пользователь недавно прислал фото. Вот что на нём было:\n{photo_context}\nИспользуй эту информацию если пользователь спрашивает про фото."
+
     history.append({"role": "user", "content": text})
     if len(history) > 20:
         history = history[-20:]
@@ -322,7 +383,7 @@ async def chat_reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
         response = claude.messages.create(
             model="claude-sonnet-4-5",
             max_tokens=2000,
-            system=CHAT_SYSTEM,
+            system=system,
             tools=[WEB_SEARCH_TOOL],
             messages=history,
         )
@@ -342,7 +403,7 @@ async def chat_reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
             response = claude.messages.create(
                 model="claude-sonnet-4-5",
                 max_tokens=2000,
-                system=CHAT_SYSTEM,
+                system=system,
                 tools=[WEB_SEARCH_TOOL],
                 messages=messages,
             )
@@ -355,7 +416,7 @@ async def chat_reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data["chat_history"] = history
 
         if len(reply) > 4000:
-            reply = reply[:4000] + "...\n(сократил, слишком много умных мыслей 😄)"
+            reply = reply[:4000] + "...\n(сократил 😄)"
 
         await update.message.reply_text(reply)
 
@@ -365,8 +426,8 @@ async def chat_reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Анализирует фото + ищет в интернете."""
-    await update.message.reply_text("📷 Смотрю на фото... Сейчас всё расскажу 🔍")
+    """Анализирует фото + ищет в интернете + запоминает для чата."""
+    await update.message.reply_text("📷 Смотрю... 🔍 Ищу инфу...")
 
     result = await get_image_base64(update)
     if not result:
@@ -377,7 +438,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     caption = update.message.caption or ""
 
     try:
-        # Шаг 1 — анализируем фото
+        # Анализируем фото
         vision_response = claude.messages.create(
             model="claude-sonnet-4-5",
             max_tokens=1500,
@@ -386,42 +447,51 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "content": [
                     {"type": "image", "source": {"type": "base64", "media_type": mime, "data": b64}},
                     {"type": "text", "text": (
-                        f"Проанализируй это изображение:\n"
-                        f"1. Если есть текст — распознай его полностью\n"
-                        f"2. Опиши что изображено подробно\n"
-                        f"3. Сформулируй 2-3 поисковых запроса для поиска доп. информации по этому фото\n"
+                        "Проанализируй изображение:\n"
+                        "1. Опиши подробно что изображено\n"
+                        "2. Если есть текст — распознай его полностью\n"
+                        "3. Предложи поисковый запрос для поиска доп. информации (1 запрос)\n"
                         f"{'Запрос пользователя: ' + caption if caption else ''}\n\n"
-                        f"Формат ответа:\n"
-                        f"ОПИСАНИЕ: [описание]\n"
-                        f"ТЕКСТ: [распознанный текст или 'текста нет']\n"
-                        f"ПОИСКОВЫЕ ЗАПРОСЫ: [запрос1 | запрос2 | запрос3]"
+                        "Формат:\n"
+                        "ОПИСАНИЕ: [подробное описание]\n"
+                        "ТЕКСТ: [текст с фото или 'текста нет']\n"
+                        "ПОИСК: [поисковый запрос]"
                     )}
                 ]
             }]
         )
 
         vision_text = vision_response.content[0].text
-        context.user_data["last_photo_text"] = vision_text
 
-        # Шаг 2 — ищем в интернете
-        search_queries = ""
-        if "ПОИСКОВЫЕ ЗАПРОСЫ:" in vision_text:
-            search_queries = vision_text.split("ПОИСКОВЫЕ ЗАПРОСЫ:")[-1].strip()
-            first_query = search_queries.split("|")[0].strip()
-        else:
-            first_query = caption or "информация по изображению"
+        # Извлекаем части
+        description = ""
+        ocr_text = ""
+        search_query = caption or "информация по изображению"
 
+        for line in vision_text.split("\n"):
+            if line.startswith("ОПИСАНИЕ:"):
+                description = line.replace("ОПИСАНИЕ:", "").strip()
+            elif line.startswith("ТЕКСТ:"):
+                ocr_text = line.replace("ТЕКСТ:", "").strip()
+            elif line.startswith("ПОИСК:"):
+                search_query = line.replace("ПОИСК:", "").strip()
+
+        # Сохраняем для памяти в чате
+        photo_memory = f"{description}"
+        if ocr_text and ocr_text != "текста нет":
+            photo_memory += f"\nТекст на фото: {ocr_text}"
+        context.user_data["last_photo_description"] = photo_memory
+        context.user_data["last_photo_text"] = ocr_text if ocr_text != "текста нет" else ""
+
+        # Ищем в интернете
         search_response = claude.messages.create(
             model="claude-sonnet-4-5",
             max_tokens=1500,
             tools=[WEB_SEARCH_TOOL],
-            messages=[{
-                "role": "user",
-                "content": f"Найди информацию по запросу: {first_query}"
-            }]
+            messages=[{"role": "user", "content": f"Найди информацию: {search_query}"}]
         )
 
-        messages = [{"role": "user", "content": f"Найди: {first_query}"}]
+        messages = [{"role": "user", "content": f"Найди: {search_query}"}]
         while search_response.stop_reason == "tool_use":
             tool_results = []
             for block in search_response.content:
@@ -442,25 +512,29 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         search_text = "".join(b.text for b in search_response.content if hasattr(b, "text"))
 
-        # Формируем итоговый ответ
-        clean_vision = vision_text.replace("ПОИСКОВЫЕ ЗАПРОСЫ:", "").split("\n")
-        clean_vision = "\n".join(l for l in clean_vision if not l.startswith("ПОИСКОВЫЕ"))
+        # Формируем ответ
+        reply_parts = []
+        if description:
+            reply_parts.append(f"👁 {description}")
+        if ocr_text and ocr_text != "текста нет":
+            reply_parts.append(f"\n📝 Текст на фото:\n{ocr_text}")
+        if search_text:
+            reply_parts.append(f"\n🔍 Нашёл в интернете:\n{search_text}")
 
-        final_reply = f"{clean_vision}\n\n🔍 *Нашёл в интернете:*\n{search_text}"
-
+        final_reply = "\n".join(reply_parts)
         if len(final_reply) > 4000:
             final_reply = final_reply[:4000] + "..."
 
         await update.message.reply_text(final_reply)
 
-        # Если похоже на письмо — предлагаем составить ответ
-        photo_lower = vision_text.lower()
-        if any(w in photo_lower for w in ["уважаем", "прошу", "сообщаем", "исх.", "вх.", "настоящим"]):
+        # Если письмо — предлагаем ответить
+        all_text = (description + ocr_text).lower()
+        if any(w in all_text for w in ["уважаем", "прошу", "сообщаем", "исх.", "вх.", "настоящим"]):
             kb = InlineKeyboardMarkup([
                 [InlineKeyboardButton("✉️ Составить ответ на письмо", callback_data="write_reply")],
             ])
             await update.message.reply_text(
-                "Это похоже на официальное письмо 📄 Составить ответ?",
+                "Похоже на официальное письмо 📄 Составить ответ?",
                 reply_markup=kb
             )
 
@@ -473,31 +547,45 @@ async def generate_image(update: Update, context: ContextTypes.DEFAULT_TYPE, tex
     """Генерирует изображение через DALL-E."""
     await update.message.reply_text("🎨 Рисую... Художник из меня так себе, но стараюсь 😄")
 
-    # Убираем команду из текста
+    # Очищаем запрос
     prompt = text
-    for w in ["нарисуй", "сгенерируй картинку", "создай изображение", "нарисовать", "картинку"]:
+    for w in ["нарисуй", "нарисовать", "сгенерируй картинку", "создай картинку", "создай изображение", "картинку"]:
         prompt = prompt.lower().replace(w, "").strip()
 
-    if not prompt:
-        prompt = "абстрактный деловой офисный рисунок"
+    if len(prompt) < 3:
+        prompt = "абстрактный деловой рисунок"
 
     try:
-        response = oai.images.generate(
-            model="dall-e-3",
-            prompt=prompt,
-            size="1024x1024",
-            quality="standard",
-            n=1,
-        )
+        # Пробуем DALL-E 3
+        try:
+            response = oai.images.generate(
+                model="dall-e-3",
+                prompt=prompt,
+                size="1024x1024",
+                quality="standard",
+                n=1,
+            )
+        except Exception:
+            # Fallback на DALL-E 2
+            response = oai.images.generate(
+                model="dall-e-2",
+                prompt=prompt[:1000],
+                size="512x512",
+                n=1,
+            )
+
         image_url = response.data[0].url
         await update.message.reply_photo(
             photo=image_url,
-            caption=f"🎨 Вот что получилось!\nЕсли не то — опиши точнее, я не телепат 😄"
+            caption="🎨 Вот что получилось! Если не то — опиши точнее 😄"
         )
+
     except Exception as e:
         logger.error(f"Ошибка генерации изображения: {e}", exc_info=True)
+        # Пробуем через Claude описать — хоть что-то
         await update.message.reply_text(
-            "Не смог нарисовать 😕 Либо запрос слишком странный, либо DALL-E сегодня не в настроении."
+            f"DALL-E сегодня не в духе 😅\n"
+            f"Попробуй описать точнее или чуть позже."
         )
 
 
@@ -505,35 +593,29 @@ async def cb_photo_actions(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
     await q.answer()
     if q.data == "write_reply":
-        await q.edit_message_text(
-            "Напиши что ответить — я составлю официальное письмо в Word ✉️"
-        )
+        await q.edit_message_text("Напиши что ответить — составлю письмо в Word ✉️")
         context.user_data["waiting_letter_instructions"] = True
         context.user_data["letter_original"] = context.user_data.get("last_photo_text", "")
 
 
 async def generate_letter_reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Генерирует ответное письмо в Word."""
     from docx_generator import generate_tz_docx
     instructions = await get_text(update)
     original = context.user_data.get("letter_original", "")
     context.user_data.pop("waiting_letter_instructions", None)
 
-    await update.message.reply_text("✉️ Составляю письмо... Постараюсь не облажаться 😄")
+    await update.message.reply_text("✉️ Составляю... Постараюсь не облажаться 😄")
 
     try:
         response = claude.messages.create(
             model="claude-sonnet-4-5",
             max_tokens=2000,
-            system="Ты составляешь официальные деловые письма на русском языке. "
-                   "Письмо должно быть структурированным, профессиональным. "
-                   "Начни с обращения, изложи суть, закончи подписью.",
+            system="Составляешь официальные деловые письма на русском. Профессионально, структурированно.",
             messages=[{
                 "role": "user",
-                "content": f"Оригинальное письмо:\n{original}\n\nИнструкции:\n{instructions}\n\nСоставь ответное письмо."
+                "content": f"Оригинальное письмо:\n{original}\n\nИнструкции:\n{instructions}\n\nСоставь ответ."
             }]
         )
-
         letter_text = response.content[0].text
         path = await generate_tz_docx(letter_text, "Ответное письмо")
         with open(path, "rb") as f:
@@ -556,13 +638,13 @@ async def cb_review(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
 
     if q.data == "review_ok":
-        await q.edit_message_text("Отлично! Значит я не зря старался 😄 → /new для нового запроса")
+        await q.edit_message_text("Значит я не зря старался 😄 → /new для нового запроса")
         sessions.pop(uid, None)
         last_doc.pop(uid, None)
         return ConversationHandler.END
 
     elif q.data == "review_edit":
-        await q.edit_message_text("Ладно, слушаю замечания. Только по делу, без 'просто переделай всё' 😄")
+        await q.edit_message_text("Слушаю замечания. Только по делу, без 'переделай всё' 😄")
         return REVIEWING
 
 
@@ -596,17 +678,14 @@ async def apply_edits(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         if doc_type == "criteria":
             path = await generate_criteria_docx(new_content, name)
-            filename = f"Критерии_{name[:35]}.docx"
-            caption = "📋 Исправленные критерии!"
+            filename, caption = f"Критерии_{name[:35]}.docx", "📋 Исправленные критерии!"
         else:
             path = await generate_tz_docx(new_content, name)
-            filename = f"ТЗ_{name[:40]}.docx"
-            caption = "📄 Исправленное ТЗ!"
+            filename, caption = f"ТЗ_{name[:40]}.docx", "📄 Исправленное ТЗ!"
 
         with open(path, "rb") as f:
             await update.message.reply_document(document=f, filename=filename, caption=caption)
         os.remove(path)
-
         await update.message.reply_text("Готово! Теперь устраивает? 😊", reply_markup=review_kb())
         return REVIEWING
 
@@ -701,7 +780,6 @@ async def do_generate(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = update.callback_query.message if update.callback_query else update.message
 
     try:
-        # Генерируем ТЗ если нужно
         if agent.doc_type in ("tz_only", "both"):
             content = await agent.generate_tz()
             last_doc[uid] = {"content": content, "type": "tz", "name": agent.tender_name}
@@ -714,12 +792,10 @@ async def do_generate(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 )
             os.remove(path)
 
-        # Для критериев — сначала показываем превью
         if agent.doc_type in ("criteria_only", "both"):
             await msg.reply_text("Сейчас покажу что планирую включить в критерии... 🤔")
             return await show_criteria_preview(msg, agent, context)
 
-        # Если только ТЗ — спрашиваем про критерии
         if agent.doc_type == "tz_only":
             kb = InlineKeyboardMarkup([
                 [InlineKeyboardButton("📋 Да, добавить критерии", callback_data="yes_criteria")],
@@ -757,7 +833,7 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     sessions.pop(uid, None)
     last_doc.pop(uid, None)
     context.user_data.clear()
-    await update.message.reply_text("Отменено 👌 Пиши если что — никуда не денусь 😄")
+    await update.message.reply_text("Отменено 👌 Пиши если что!")
     return ConversationHandler.END
 
 
@@ -782,6 +858,7 @@ def main():
             ],
             CRITERIA_CONFIRM: [
                 CallbackQueryHandler(cb_criteria_confirm, pattern="^criteria_(go|add|remove)$"),
+                CallbackQueryHandler(cb_delete_criterion, pattern="^del_criterion_\\d+$"),
                 MessageHandler(tv, handle_criteria_edit),
             ],
             REVIEWING: [
@@ -796,10 +873,10 @@ def main():
     app.add_handler(CommandHandler("start", start))
     app.add_handler(conv)
     app.add_handler(MessageHandler(photo_f, chat_reply))
-    app.add_handler(CallbackQueryHandler(cb_photo_actions, pattern="^(write_reply|search_photo)$"))
+    app.add_handler(CallbackQueryHandler(cb_photo_actions, pattern="^write_reply$"))
     app.add_handler(MessageHandler(tv, chat_reply))
 
-    logger.info("Бот v4 запущен 🚀")
+    logger.info("Бот v5 запущен 🚀")
     app.run_polling(allowed_updates=Update.ALL_TYPES)
 
 
