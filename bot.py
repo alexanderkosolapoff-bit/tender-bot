@@ -1195,11 +1195,10 @@ async def cmd_users(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("⛔ Только для администратора.")
         return
 
-    all_users = get_all_users()  # Все кто писал боту (из /tmp)
+    all_users = get_all_users()
     whitelist = ALLOWED_USERS | DYNAMIC_USERS
 
-    lines = ["👥 *Все пользователи бота:*
-"]
+    lines = ["\U0001f465 *Все пользователи бота:*\n"]
     if not all_users:
         lines.append("Пока никто не писал боту (или список сбросился после перезапуска).")
     else:
@@ -1209,17 +1208,12 @@ async def cmd_users(update: Update, context: ContextTypes.DEFAULT_TYPE):
             name = f"@{username}" if username else "без username"
             lines.append(f"{status} {uid_int} — {name}")
 
-    lines.append(f"
-📋 *В белом списке:* {len(whitelist)} чел.")
-    lines.append("
-✅ — есть доступ
-🔒 — нет доступа")
-    lines.append("
-Чтобы добавить: `/adduser ID`")
+    lines.append(f"\n\U0001f4cb *В белом списке:* {len(whitelist)} чел.")
+    lines.append("\n\u2705 \u2014 есть доступ\n\U0001f512 \u2014 нет доступа")
+    lines.append("\nЧтобы добавить: `/adduser ID`")
     lines.append("Чтобы убрать: `/removeuser ID`")
 
-    await update.message.reply_text("
-".join(lines), parse_mode="Markdown")
+    await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
 
 
 async def cmd_adduser(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1232,8 +1226,7 @@ async def cmd_adduser(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if not context.args:
         await update.message.reply_text(
-            "Укажи Telegram ID пользователя:
-`/adduser 123456789`",
+            "Укажи Telegram ID пользователя:\n`/adduser 123456789`",
             parse_mode="Markdown"
         )
         return
@@ -1258,8 +1251,7 @@ async def cmd_adduser(update: Update, context: ContextTypes.DEFAULT_TYPE):
         notified = "Не смог уведомить (пользователь не писал боту)."
 
     await update.message.reply_text(
-        f"✅ Пользователь `{new_uid}` добавлен в белый список.
-{notified}",
+        f"\u2705 Пользователь `{new_uid}` добавлен в белый список.\n{notified}",
         parse_mode="Markdown"
     )
 
@@ -1273,8 +1265,7 @@ async def cmd_removeuser(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if not context.args:
-        await update.message.reply_text("Укажи ID:
-`/removeuser 123456789`", parse_mode="Markdown")
+        await update.message.reply_text("Укажи ID:\n`/removeuser 123456789`", parse_mode="Markdown")
         return
 
     try:
@@ -1290,8 +1281,7 @@ async def cmd_removeuser(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif rem_uid in ALLOWED_USERS:
         await update.message.reply_text(
             f"⚠️ Пользователь `{rem_uid}` добавлен через переменную ALLOWED_USERS на Railway — "
-            f"удали его оттуда вручную в настройках Railway.",
-            parse_mode="Markdown"
+            f"удали его оттуда вручную в настройках Railway.",parse_mode="Markdown"
         )
     else:
         await update.message.reply_text(f"Пользователь `{rem_uid}` не найден в белом списке.", parse_mode="Markdown")
