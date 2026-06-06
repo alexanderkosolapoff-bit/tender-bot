@@ -1375,7 +1375,7 @@ def main():
     app.add_handler(CallbackQueryHandler(cb_save_to_word, pattern="^save_to_word$"))
     app.add_handler(MessageHandler(tv, chat_reply))
 
-    logger.info("Бот v10 запущен"🚀")
+    logger.info("Bot v10 started")
     app.run_polling(allowed_updates=Update.ALL_TYPES)
 
 
