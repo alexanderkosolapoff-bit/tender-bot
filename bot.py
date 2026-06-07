@@ -515,11 +515,28 @@ async def cb_answer(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def text_answer(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
+    text = await get_text(update)
+    # Если нажали кнопку постоянной клавиатуры - выходим из диалога
+    if text in ("Новый запрос", "Помощь"):
+        sessions.pop(uid, None)
+        last_doc.pop(uid, None)
+        context.user_data.clear()
+        if text == "Новый запрос":
+            await update.message.reply_text("Что делаем?", reply_markup=menu_kb())
+        else:
+            await update.message.reply_text(
+                "Что умею:\n\n- 'Новый запрос' - создать ТЗ, критерии, сценарий переговоров\n"
+                "- Любой вопрос - отвечу\n- Ищу в интернете\n"
+                "- Фото - опишу, найду инфу, распознаю текст\n"
+                "- 'сохрани' - сохраню последний ответ в Word или PDF\n"
+                "/cancel - отменить текущий запрос",
+                reply_markup=main_kb()
+            )
+        return ConversationHandler.END
     agent = sessions.get(uid)
     if not agent:
         await update.message.reply_text("Сессия устарела. Начни заново.")
         return ConversationHandler.END
-    text = await get_text(update)
     if not text: return ANSWERING
     return await _handle_answer(update, context, text)
 
@@ -748,6 +765,10 @@ async def cb_review(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def apply_edits(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
     edits = await get_text(update)
+    if edits in ("Новый запрос", "Помощь"):
+        sessions.pop(uid, None); last_doc.pop(uid, None); context.user_data.clear()
+        await update.message.reply_text("Что делаем?", reply_markup=menu_kb())
+        return ConversationHandler.END
     doc_info = last_doc.get(uid, {})
     if not doc_info:
         await update.message.reply_text("Не нашел документ. Попробуй заново.")
@@ -786,6 +807,14 @@ async def cb_neg_answer(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def neg_text_answer(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = await get_text(update)
     if not text: return NEGOTIATION
+    uid = update.effective_user.id
+    # Если нажали кнопку постоянной клавиатуры - выходим
+    if text in ("Новый запрос", "Помощь"):
+        sessions.pop(uid, None)
+        last_doc.pop(uid, None)
+        context.user_data.clear()
+        await update.message.reply_text("Что делаем?", reply_markup=menu_kb())
+        return ConversationHandler.END
     step = context.user_data.pop("neg_custom_step", context.user_data.get("neg_step", 0))
     return await _save_neg(update.message, context, step, text)
 
