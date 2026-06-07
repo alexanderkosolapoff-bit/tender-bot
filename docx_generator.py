@@ -14,10 +14,11 @@ from docx.oxml import OxmlElement
 
 logger = logging.getLogger(__name__)
 
-FONTS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fonts")
-FONT_REG  = os.path.join(FONTS_DIR, "DejaVuSerif.ttf")
-FONT_BOLD = os.path.join(FONTS_DIR, "DejaVuSerif-Bold.ttf")
-FONT_ITAL = os.path.join(FONTS_DIR, "DejaVuSerif-Italic.ttf")
+# Ищем шрифты — сначала в папке fonts/, потом в корне проекта
+_BASE = os.path.dirname(os.path.abspath(__file__))
+FONT_REG  = os.path.join(_BASE, "fonts", "DejaVuSerif.ttf") if os.path.exists(os.path.join(_BASE, "fonts", "DejaVuSerif.ttf")) else os.path.join(_BASE, "DejaVuSerif.ttf")
+FONT_BOLD = os.path.join(_BASE, "fonts", "DejaVuSerif-Bold.ttf") if os.path.exists(os.path.join(_BASE, "fonts", "DejaVuSerif-Bold.ttf")) else os.path.join(_BASE, "DejaVuSerif-Bold.ttf")
+FONT_ITAL = os.path.join(_BASE, "fonts", "DejaVuSerif-Italic.ttf") if os.path.exists(os.path.join(_BASE, "fonts", "DejaVuSerif-Italic.ttf")) else os.path.join(_BASE, "DejaVuSerif-Italic.ttf")
 
 
 def _strip_md(text: str) -> str:
