@@ -515,24 +515,9 @@ async def cb_answer(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def text_answer(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
-    text = await get_text(update)
-    # Если нажали кнопку постоянной клавиатуры - выходим из диалога
-    if text in ("Новый запрос", "Помощь"):
-        sessions.pop(uid, None)
-        last_doc.pop(uid, None)
-        context.user_data.clear()
-        if text == "Новый запрос":
-            await update.message.reply_text("Что делаем?", reply_markup=menu_kb())
-        else:
-            await update.message.reply_text(
-                "Что умею:\n\n- 'Новый запрос' - создать ТЗ, критерии, сценарий переговоров\n"
-                "- Любой вопрос - отвечу\n- Ищу в интернете\n"
-                "- Фото - опишу, найду инфу, распознаю текст\n"
-                "- 'сохрани' - сохраню последний ответ в Word или PDF\n"
-                "/cancel - отменить текущий запрос",
-                reply_markup=main_kb()
-            )
+    if await keyboard_buttons(update, context):
         return ConversationHandler.END
+    text = await get_text(update)
     agent = sessions.get(uid)
     if not agent:
         await update.message.reply_text("Сессия устарела. Начни заново.")
@@ -699,6 +684,8 @@ async def cb_del_criterion(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return CRITERIA_CONF
 
 async def handle_criteria_edit(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if await keyboard_buttons(update, context):
+        return ConversationHandler.END
     text = await get_text(update)
     lst = context.user_data.get("criteria_list", [])
     response = claude.messages.create(
@@ -763,12 +750,10 @@ async def cb_review(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return REVIEWING
 
 async def apply_edits(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if await keyboard_buttons(update, context):
+        return ConversationHandler.END
     uid = update.effective_user.id
     edits = await get_text(update)
-    if edits in ("Новый запрос", "Помощь"):
-        sessions.pop(uid, None); last_doc.pop(uid, None); context.user_data.clear()
-        await update.message.reply_text("Что делаем?", reply_markup=menu_kb())
-        return ConversationHandler.END
     doc_info = last_doc.get(uid, {})
     if not doc_info:
         await update.message.reply_text("Не нашел документ. Попробуй заново.")
@@ -805,16 +790,10 @@ async def cb_neg_answer(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return await _save_neg(q.message, context, step, answer)
 
 async def neg_text_answer(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if await keyboard_buttons(update, context):
+        return ConversationHandler.END
     text = await get_text(update)
     if not text: return NEGOTIATION
-    uid = update.effective_user.id
-    # Если нажали кнопку постоянной клавиатуры - выходим
-    if text in ("Новый запрос", "Помощь"):
-        sessions.pop(uid, None)
-        last_doc.pop(uid, None)
-        context.user_data.clear()
-        await update.message.reply_text("Что делаем?", reply_markup=menu_kb())
-        return ConversationHandler.END
     step = context.user_data.pop("neg_custom_step", context.user_data.get("neg_step", 0))
     return await _save_neg(update.message, context, step, text)
 
@@ -1060,6 +1039,34 @@ async def cb_save_to_word(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if msgs_list:
         last_doc[uid] = {"content": msgs_list[-1], "type": "chat", "name": "Dokument"}
     await q.edit_message_text("В каком формате сохранить?", reply_markup=save_kb())
+
+async def keyboard_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Перехватывает нажатия постоянных кнопок клавиатуры из любого состояния."""
+    text = update.message.text if update.message.text else ""
+    uid = update.effective_user.id
+
+    if text == "Новый запрос":
+        sessions.pop(uid, None)
+        last_doc.pop(uid, None)
+        context.user_data.clear()
+        await update.message.reply_text("Что делаем?", reply_markup=menu_kb())
+        return True  # Обработано
+
+    if text == "Помощь":
+        await update.message.reply_text(
+            "Что умею:\n\n"
+            "- Кнопка 'Новый запрос' — создать ТЗ, критерии, сценарий переговоров\n"
+            "- Любой вопрос — отвечу\n"
+            "- Ищу в интернете\n"
+            "- Фото — опишу, найду инфу, распознаю текст\n"
+            "- 'сохрани' — сохраню последний ответ в Word или PDF\n"
+            "/cancel — отменить текущий запрос",
+            reply_markup=main_kb()
+        )
+        return True
+
+    return False  # Не обработано
+
 
 # ─── Запуск ─────────────────────────────────────────────────────────────────
 def main():
