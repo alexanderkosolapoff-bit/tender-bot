@@ -619,13 +619,28 @@ async def cb_save_format(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else: gen_docx = lambda: generate_tz_docx(content, name); base = f"Doc_{name[:20]}"
     await q.edit_message_text("Создаю файл(ы)...")
     try:
+        chat_id = q.message.chat_id
         if fmt in ("docx", "both"):
             path = await gen_docx()
-            await send_docx(q.message, path, f"{base}.docx", "📄 Word готов!")
+            with open(path, "rb") as f:
+                await context.bot.send_document(
+                    chat_id=chat_id,
+                    document=f,
+                    filename=f"{base}.docx",
+                    caption="📄 Word готов!"
+                )
+            os.remove(path)
         if fmt in ("pdf", "both"):
             path = await generate_pdf(content, name)
-            await send_pdf(q.message, path, f"{base}.pdf", "📕 PDF готов!")
-        await q.message.reply_text("Всё устраивает?", reply_markup=review_kb())
+            with open(path, "rb") as f:
+                await context.bot.send_document(
+                    chat_id=chat_id,
+                    document=f,
+                    filename=f"{base}.pdf",
+                    caption="📕 PDF готов!"
+                )
+            os.remove(path)
+        await context.bot.send_message(chat_id=chat_id, text="Всё устраивает?", reply_markup=review_kb())
         return REVIEWING
     except Exception as e:
         logger.error(f"Save: {e}", exc_info=True)
@@ -701,10 +716,12 @@ async def _save_neg(msg, context: ContextTypes.DEFAULT_TYPE, step: int, answer: 
     return await _gen_negotiation(msg, context)
 
 async def _gen_negotiation(msg, context: ContextTypes.DEFAULT_TYPE):
+    from docx_generator import generate_tz_docx, generate_pdf
     uid = msg.chat_id
     answers = context.user_data.get("neg_answers", {})
     ctx = "\n".join(f"{answers[i]['q']}: {answers[i]['a']}" for i in range(len(NEGOTIATION_STEPS)) if i in answers)
     try:
+        await msg.reply_text("Составляю сценарий переговоров...")
         resp = claude.messages.create(
             model="claude-sonnet-4-5", max_tokens=4000, system=NEGOTIATION_SYSTEM,
             messages=[{"role": "user", "content": f"Данные:\n{ctx}\n\nСоставь конкретный сценарий без воды."}]
@@ -712,7 +729,12 @@ async def _gen_negotiation(msg, context: ContextTypes.DEFAULT_TYPE):
         content = resp.content[0].text
         remember(uid, content)
         last_doc[uid] = {"content": content, "type": "negotiation", "name": "Scenariy"}
-        await msg.reply_text("В каком формате сохранить?", reply_markup=word_pdf_kb())
+
+        # Спрашиваем формат
+        await msg.reply_text(
+            "Сценарий готов! В каком формате сохранить?",
+            reply_markup=word_pdf_kb()
+        )
         return SAVE_FORMAT
     except Exception as e:
         logger.error(f"Neg: {e}", exc_info=True)
