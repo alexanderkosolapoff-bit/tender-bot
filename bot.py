@@ -794,65 +794,95 @@ async def chat_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
-    # caption — текст написанный вместе с фото
     caption = update.message.caption or ""
-    await update.message.reply_text("Смотрю на фото...")
+    await update.message.reply_text("Смотрю на фото и ищу информацию...")
     result = await get_image_b64(update)
     if not result: await update.message.reply_text("Не смог получить фото."); return
     b64, mime = result
     try:
+        # Шаг 1: анализируем фото через Vision
+        vision_prompt = (
+            "Проанализируй изображение детально:\n"
+            "1. Опиши подробно что изображено (предметы, бренды, модели, текст на упаковке)\n"
+            "2. Если есть текст — распознай его полностью\n"
+            "3. Составь конкретный поисковый запрос для поиска информации об этом\n"
+        )
+        if caption:
+            vision_prompt += f"\nВопрос пользователя: {caption}\n"
+        vision_prompt += "\nФормат ответа:\nОПИСАНИЕ: [подробное описание]\nТЕКСТ: [текст с фото или 'текста нет']\nПОИСК: [конкретный поисковый запрос]"
+
         vision = claude.messages.create(
             model="claude-sonnet-4-5", max_tokens=1500,
             messages=[{"role": "user", "content": [
                 {"type": "image", "source": {"type": "base64", "media_type": mime, "data": b64}},
-                {"type": "text", "text": (
-                    f"Проанализируй изображение:\n"
-                    f"1. Опиши подробно что изображено\n"
-                    f"2. Если есть текст — распознай его полностью\n"
-                    f"3. Предложи поисковый запрос для доп. информации\n"
-                    + (f"Вопрос пользователя: {caption}\n" if caption else "") +
-                    f"\nФормат:\nОПИСАНИЕ: ...\nТЕКСТ: ...\nПОИСК: ..."
-                )}
+                {"type": "text", "text": vision_prompt}
             ]}]
         )
         vtext = vision.content[0].text
-        desc = ocr = ""; search_q = caption or "информация по изображению"
+        desc = ocr = ""
+        search_q = caption if caption else "информация по изображению"
+
         for line in vtext.split("\n"):
-            if line.startswith("ОПИСАНИЕ:"): desc = line.replace("ОПИСАНИЕ:","").strip()
-            elif line.startswith("ТЕКСТ:"): ocr = line.replace("ТЕКСТ:","").strip()
-            elif line.startswith("ПОИСК:"): search_q = line.replace("ПОИСК:","").strip()
+            line = line.strip()
+            if line.startswith("ОПИСАНИЕ:"): desc = line.replace("ОПИСАНИЕ:", "").strip()
+            elif line.startswith("ТЕКСТ:"): ocr = line.replace("ТЕКСТ:", "").strip()
+            elif line.startswith("ПОИСК:"): search_q = line.replace("ПОИСК:", "").strip()
 
-        context.user_data["last_photo_desc"] = desc + ("\nТекст: "+ocr if ocr and ocr != "текста нет" else "")
-        context.user_data["last_photo_text"] = ocr if ocr != "текста нет" else ""
+        # Если Vision не вернул структурированный ответ — используем весь текст как описание
+        if not desc and not ocr:
+            desc = vtext.strip()
+            search_q = caption or desc[:100]
 
-        # Поиск
-        sr = claude.messages.create(model="claude-sonnet-4-5", max_tokens=1500, tools=[WEB_SEARCH_TOOL],
-            messages=[{"role": "user", "content": f"Найди информацию: {search_q}"}])
-        sm = [{"role": "user", "content": f"Найди: {search_q}"}]
-        while sr.stop_reason == "tool_use":
-            tr = [{"type": "tool_result", "tool_use_id": b.id, "content": b.input.get("query","")} for b in sr.content if b.type == "tool_use"]
-            sm.append({"role": "assistant", "content": sr.content}); sm.append({"role": "user", "content": tr})
-            sr = claude.messages.create(model="claude-sonnet-4-5", max_tokens=1500, tools=[WEB_SEARCH_TOOL], messages=sm)
-        search_text = "".join(b.text for b in sr.content if hasattr(b,"text"))
+        context.user_data["last_photo_desc"] = desc + ("\nТекст: " + ocr if ocr and ocr != "текста нет" else "")
+        context.user_data["last_photo_text"] = ocr if ocr and ocr != "текста нет" else ""
 
+        # Шаг 2: поиск по описанию (передаём текст, не изображение!)
+        search_text = ""
+        if search_q and search_q != "информация по изображению":
+            try:
+                sr = claude.messages.create(
+                    model="claude-sonnet-4-5", max_tokens=1500,
+                    tools=[WEB_SEARCH_TOOL],
+                    messages=[{"role": "user", "content": f"Найди информацию: {search_q}"}]
+                )
+                sm = [{"role": "user", "content": f"Найди: {search_q}"}]
+                while sr.stop_reason == "tool_use":
+                    tr = [{"type": "tool_result", "tool_use_id": b.id, "content": b.input.get("query", "")}
+                          for b in sr.content if b.type == "tool_use"]
+                    sm.append({"role": "assistant", "content": sr.content})
+                    sm.append({"role": "user", "content": tr})
+                    sr = claude.messages.create(
+                        model="claude-sonnet-4-5", max_tokens=1500,
+                        tools=[WEB_SEARCH_TOOL], messages=sm
+                    )
+                search_text = "".join(b.text for b in sr.content if hasattr(b, "text"))
+            except Exception as se:
+                logger.error(f"Search error: {se}")
+
+        # Формируем ответ
         parts = []
         if desc: parts.append(f"На фото: {desc}")
         if ocr and ocr != "текста нет": parts.append(f"\nТекст с фото:\n{ocr}")
         if search_text: parts.append(f"\nНашёл в интернете:\n{search_text}")
         final = "\n".join(parts)
+        if not final: final = "Не смог получить описание фото."
         if len(final) > 4000: final = final[:4000] + "..."
+
         remember(uid, final)
         await update.message.reply_text(final)
 
         # Если похоже на письмо — предлагаем ответ
         all_text = (desc + ocr).lower()
-        if any(w in all_text for w in ["уважаем","прошу","сообщаем","исх.","вх.","направляем"]):
+        if any(w in all_text for w in ["уважаем", "прошу", "сообщаем", "исх.", "вх.", "направляем"]):
             await update.message.reply_text(
                 "Похоже на официальное письмо. Составить ответ?",
-                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("✉️ Составить ответ", callback_data="photo_write_reply")]]))
+                reply_markup=InlineKeyboardMarkup([[
+                    InlineKeyboardButton("✉️ Составить ответ", callback_data="photo_write_reply")
+                ]])
+            )
     except Exception as e:
         logger.error(f"Photo: {e}", exc_info=True)
-        await update.message.reply_text("Не смог обработать фото.")
+        await update.message.reply_text("Не смог обработать фото. Попробуй ещё раз.")
 
 async def cb_photo_reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query; await q.answer()
