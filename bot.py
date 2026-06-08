@@ -36,6 +36,8 @@ SAVE_FORMAT  = 7  # Word+PDF выбор (переговоры, письмо)
 LETTER_TYPE  = 8
 LETTER_PHOTO = 9
 LETTER_TASK  = 10
+ANALYSIS_DOC = 11  # Ждём документ для анализа
+ANALYSIS_QA  = 12  # Уточняющие вопросы после анализа
 
 sessions: dict[int, TenderAgent] = {}
 last_doc: dict[int, dict]        = {}
