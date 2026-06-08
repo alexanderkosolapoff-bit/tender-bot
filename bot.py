@@ -998,7 +998,7 @@ async def receive_analysis_doc(update: Update, context: ContextTypes.DEFAULT_TYP
 
 
 async def do_analysis(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Проводит анализ ТЗ и выдаёт замечания."""
+    """Проводит анализ ТЗ и сразу сохраняет заключение в Word."""
     from docx_generator import generate_tz_docx
     uid = update.effective_user.id
     doc_text = context.user_data.get("analysis_doc", "")
@@ -1009,17 +1009,27 @@ async def do_analysis(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     try:
         prompt = (
-            "Проведи экспертизу следующего технического задания организатора тендера. "
-            "Мы — организаторы, нам нужно проверить качество документа перед публикацией.\n\n"
+            "Проведи экспертизу технического задания организатора тендера. "
+            "Мы организаторы, нам нужно проверить качество документа перед публикацией. "
+            "Ответь подробно, не обрезай текст.\n\n"
             "ДОКУМЕНТ:\n" + doc_text[:12000] + "\n\n"
-            "Выдай структурированное заключение:\n"
-            "1. КРАТКОЕ РЕЗЮМЕ (3-5 предложений — общее впечатление и главные проблемы)\n"
-            "2. ОШИБКИ И ПРОТИВОРЕЧИЯ — с указанием раздела и как исправить\n"
-            "3. ОГРАНИЧИВАЮЩИЕ ТРЕБОВАНИЯ — что может вызвать жалобу в ФАС, как смягчить\n"
-            "4. НЕЧЕТКИЕ ФОРМУЛИРОВКИ — что участник может трактовать иначе, предложи точные варианты\n"
-            "5. НЕДОСТАЮЩИЕ ТРЕБОВАНИЯ — что важно добавить\n"
-            "6. УТОЧНЯЮЩИЕ ВОПРОСЫ — не более 3-5 если что-то неясно\n\n"
-            "По каждому замечанию давай конкретное предложение по исправлению."
+            "Выдай полное структурированное заключение:\n\n"
+            "ЭКСПЕРТНОЕ ЗАКЛЮЧЕНИЕ\n\n"
+            "1. КРАТКОЕ РЕЗЮМЕ\n"
+            "Общее впечатление о качестве документа, основные проблемы.\n\n"
+            "2. ОШИБКИ И ПРОТИВОРЕЧИЯ\n"
+            "Для каждой ошибки: раздел документа, описание проблемы, как исправить.\n\n"
+            "3. ОГРАНИЧИВАЮЩИЕ ТРЕБОВАНИЯ (риск жалобы в ФАС)\n"
+            "Требования которые могут быть расценены как ограничение конкуренции. "
+            "Как смягчить формулировку.\n\n"
+            "4. НЕЧЕТКИЕ ФОРМУЛИРОВКИ\n"
+            "Что участник может трактовать иначе. Предложи точные варианты формулировок.\n\n"
+            "5. НЕДОСТАЮЩИЕ ТРЕБОВАНИЯ\n"
+            "Что важно прописать дополнительно для защиты интересов заказчика.\n\n"
+            "6. КОНКРЕТНЫЕ ПРЕДЛОЖЕНИЯ ПО ДОРАБОТКЕ\n"
+            "Список конкретных правок с готовыми формулировками.\n\n"
+            "7. УТОЧНЯЮЩИЕ ВОПРОСЫ (если есть)\n"
+            "Не более 3-5 вопросов если что-то неясно из документа."
         )
 
         response = claude.messages.create(
@@ -1033,18 +1043,26 @@ async def do_analysis(update: Update, context: ContextTypes.DEFAULT_TYPE):
         remember(uid, analysis_text)
         context.user_data["analysis_result"] = analysis_text
 
-        if len(analysis_text) > 3800:
-            await update.message.reply_text(analysis_text[:3800])
-            await update.message.reply_text(analysis_text[3800:])
-        else:
-            await update.message.reply_text(analysis_text)
+        # Сразу сохраняем в Word — никакого текста в чате
+        await update.message.reply_text("Готово! Сохраняю заключение в Word...")
+        path = await generate_tz_docx(analysis_text, "Ekspertiza")
+        with open(path, "rb") as f:
+            await context.bot.send_document(
+                chat_id=uid,
+                document=f,
+                filename="Ekspertiza_TZ.docx",
+                caption="Экспертное заключение готово!"
+            )
+        os.remove(path)
 
         kb = InlineKeyboardMarkup([
-            [InlineKeyboardButton("Сохранить заключение в Word", callback_data="save_analysis")],
             [InlineKeyboardButton("Задать уточняющий вопрос", callback_data="analysis_question")],
             [InlineKeyboardButton("Всё понятно", callback_data="analysis_done")],
         ])
-        await update.message.reply_text("Экспертиза завершена. Что делаем дальше?", reply_markup=kb)
+        await update.message.reply_text(
+            "Заключение в файле. Есть уточняющие вопросы?",
+            reply_markup=kb
+        )
         return ANALYSIS_QA
 
     except Exception as e:
@@ -1060,29 +1078,7 @@ async def cb_analysis_actions(update: Update, context: ContextTypes.DEFAULT_TYPE
     await q.answer()
     uid = update.effective_user.id
 
-    if q.data == "save_analysis":
-        analysis_text = context.user_data.get("analysis_result", "")
-        if not analysis_text:
-            await q.edit_message_text("Не нашёл результат анализа.")
-            return ConversationHandler.END
-        await q.edit_message_text("Сохраняю заключение в Word...")
-        try:
-            path = await generate_tz_docx(analysis_text, "Analiz")
-            with open(path, "rb") as f:
-                await context.bot.send_document(
-                    chat_id=uid,
-                    document=f,
-                    filename="Ekspertiza_TZ.docx",
-                    caption="Заключение по экспертизе ТЗ готово!"
-                )
-            os.remove(path)
-        except Exception as e:
-            logger.error(f"Save analysis: {e}", exc_info=True)
-            await q.message.reply_text("Ошибка при сохранении.")
-        await q.message.reply_text("Для нового анализа или документа: /new")
-        return ConversationHandler.END
-
-    elif q.data == "analysis_question":
+    if q.data == "analysis_question":
         await q.edit_message_text(
             "Задай уточняющий вопрос или попроси развернуть любой пункт заключения:"
         )
