@@ -1402,22 +1402,74 @@ async def cb_save_to_word(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await save_last(update, context)
 
 # ─── Запуск ──────────────────────────────────────────────────────────────────
+async def intent_or_doc_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Универсальный обработчик: намерения по тексту + файлы в чате.
+    Добавлен в entry_points и fallbacks ConversationHandler."""
+    uid = update.effective_user.id
+    if not is_allowed(uid):
+        await update.message.reply_text("Нет доступа.")
+        return ConversationHandler.END
+    save_user(uid, update.effective_user.username or "")
+
+    # Обработка документа (не фото)
+    if update.message.document:
+        mime = update.message.document.mime_type or ""
+        fname = update.message.document.file_name or ""
+        is_image = mime.startswith("image/")
+        is_text_doc = ("word" in mime or "pdf" in mime or "text" in mime or
+                       fname.lower().endswith((".docx", ".doc", ".pdf", ".txt")))
+        if is_text_doc:
+            await handle_doc_in_chat(update, context)
+            return ConversationHandler.END
+        if is_image:
+            await handle_photo(update, context)
+            return ConversationHandler.END
+
+    # Обработка текстовых намерений
+    if update.message.text:
+        text = update.message.text.strip()
+        # Навигация
+        if "/new" in text:
+            sessions.pop(uid, None); last_doc.pop(uid, None); context.user_data.clear()
+            await update.message.reply_text("Что делаем?", reply_markup=menu_kb())
+            return CHOOSING
+        # Намерения
+        intent = detect_intent(text)
+        if intent:
+            sessions.pop(uid, None); last_doc.pop(uid, None); context.user_data.clear()
+            await _handle_intent(update, context, intent)
+            if intent == "menu_negotiation":
+                return NEGOTIATION
+            if intent in ("menu_tz", "menu_criteria", "menu_both"):
+                return CHOOSING
+            return ConversationHandler.END
+
+    return ConversationHandler.END
+
 def main():
     app = Application.builder().token(os.environ["TELEGRAM_BOT_TOKEN"]).build()
     tv = (filters.TEXT | filters.VOICE) & ~filters.COMMAND
     pf = filters.PHOTO | filters.Document.IMAGE
     df = filters.Document.ALL
 
+    # Фильтр для текстовых документов
+    doc_filter = filters.Document.ALL & ~filters.PHOTO
+
     conv = ConversationHandler(
         entry_points=[
             CommandHandler("new", cmd_new),
             CallbackQueryHandler(cb_menu, pattern="^menu_"),
+            # Намерения и файлы запускают диалог из любого места
+            MessageHandler(doc_filter, intent_or_doc_handler),
+            MessageHandler(tv, intent_or_doc_handler),
         ],
         states={
             CHOOSING: [
                 CallbackQueryHandler(cb_menu,      pattern="^menu_"),
                 CallbackQueryHandler(cb_direction,  pattern="^dir_"),
                 CallbackQueryHandler(cb_hasdoc,     pattern="^hasdoc_"),
+                MessageHandler(doc_filter, intent_or_doc_handler),
+                MessageHandler(tv, intent_or_doc_handler),
             ],
             WAITING_DOC: [
                 MessageHandler(df, receive_customer_doc),
@@ -1425,20 +1477,25 @@ def main():
             ],
             NEGOTIATION: [
                 CallbackQueryHandler(cb_neg_answer, pattern="^neg_"),
+                MessageHandler(doc_filter, intent_or_doc_handler),
                 MessageHandler(tv, neg_text_answer),
             ],
             ANSWERING: [
                 CallbackQueryHandler(cb_answer, pattern="^ans_"),
+                MessageHandler(doc_filter, intent_or_doc_handler),
                 MessageHandler(tv, text_answer),
             ],
             CRITERIA_Q: [
                 CallbackQueryHandler(cb_criteria_q, pattern="^(yes|no)_criteria$"),
+                MessageHandler(doc_filter, intent_or_doc_handler),
             ],
             SAVE_FORMAT: [
                 CallbackQueryHandler(cb_save_format, pattern="^fmt_"),
+                MessageHandler(doc_filter, intent_or_doc_handler),
             ],
             REVIEWING: [
                 CallbackQueryHandler(cb_review, pattern="^review_"),
+                MessageHandler(doc_filter, intent_or_doc_handler),
                 MessageHandler(tv, apply_edits),
             ],
             LETTER_TYPE: [
@@ -1451,12 +1508,12 @@ def main():
                 MessageHandler(tv, receive_letter_task),
             ],
             ANALYSIS_DOC: [
-                MessageHandler(filters.Document.ALL | filters.PHOTO | filters.Document.IMAGE | tv,
-                               receive_analysis_doc),
+                MessageHandler(filters.Document.ALL | pf | tv, receive_analysis_doc),
             ],
             ANALYSIS_QA: [
                 CallbackQueryHandler(cb_analysis_actions,
                                      pattern="^(save_analysis|analysis_question|analysis_done)$"),
+                MessageHandler(doc_filter, intent_or_doc_handler),
                 MessageHandler(tv, analysis_followup),
             ],
             DOC_RECEIVED: [
@@ -1464,10 +1521,14 @@ def main():
             ],
             DOC_EDIT_CMT: [
                 CallbackQueryHandler(cb_doc_edit_actions, pattern="^docact_edit_"),
+                MessageHandler(doc_filter, intent_or_doc_handler),
                 MessageHandler(tv, apply_doc_edit),
             ],
         },
-        fallbacks=[CommandHandler("cancel", cmd_cancel)],
+        fallbacks=[
+            CommandHandler("cancel", cmd_cancel),
+            MessageHandler(doc_filter, intent_or_doc_handler),
+        ],
         allow_reentry=True,
     )
 
