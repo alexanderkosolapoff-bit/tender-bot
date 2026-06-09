@@ -1510,7 +1510,6 @@ def main():
                 CallbackQueryHandler(cb_direction,  pattern="^dir_"),
                 CallbackQueryHandler(cb_hasdoc,     pattern="^hasdoc_"),
                 MessageHandler(doc_filter, intent_or_doc_handler),
-                MessageHandler(tv, intent_or_doc_handler),
             ],
             WAITING_DOC: [
                 MessageHandler(df, receive_customer_doc),
