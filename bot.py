@@ -1506,9 +1506,7 @@ def main():
         entry_points=[
             CommandHandler("new", cmd_new),
             CallbackQueryHandler(cb_menu, pattern="^menu_"),
-            # Намерения и файлы запускают диалог из любого места
             MessageHandler(doc_filter, intent_or_doc_handler),
-            MessageHandler(tv, intent_or_doc_handler),
         ],
         states={
             CHOOSING: [
@@ -1575,9 +1573,10 @@ def main():
         },
         fallbacks=[
             CommandHandler("cancel", cmd_cancel),
+            CommandHandler("new", cmd_new),
             MessageHandler(doc_filter, intent_or_doc_handler),
         ],
-        allow_reentry=True,
+        allow_reentry=False,
     )
 
     app.add_handler(CommandHandler("start",      cmd_start))
