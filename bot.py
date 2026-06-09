@@ -869,22 +869,24 @@ async def chat_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     text = await get_text(update)
     if not text: return
-    if await check_nav(update, context): return
 
-    tl = text.lower()
-    if any(w in tl for w in ["сохрани", "в ворд", "в word", "сделай файл"]):
-        await save_last(update, context); return
-
-    # Ждём комментарии для редактуры документа
+    # Ждём комментарии для редактуры — проверяем ДО check_nav
     if context.user_data.get("waiting_doc_edit"):
         context.user_data.pop("waiting_doc_edit")
         await apply_doc_edit(update, context)
         return
 
-    # Проверяем ждём ли письмо по фото
+    # Ждём ответ на письмо по фото
     if context.user_data.get("waiting_photo_reply"):
         context.user_data.pop("waiting_photo_reply")
-        await gen_letter_from_photo(update, context, text); return
+        await gen_letter_from_photo(update, context, text)
+        return
+
+    if await check_nav(update, context): return
+
+    tl = text.lower()
+    if any(w in tl for w in ["сохрани", "в ворд", "в word", "сделай файл"]):
+        await save_last(update, context); return
 
     photo_ctx = context.user_data.get("last_photo_desc", "")
     system = CHAT_SYSTEM + (f"\n\nКонтекст фото: {photo_ctx}" if photo_ctx else "")
@@ -1308,11 +1310,15 @@ async def cb_doc_action(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def apply_doc_edit(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Редактирует документ по комментариям пользователя."""
     from docx_generator import generate_tz_docx
-    if await check_nav(update, context): return ConversationHandler.END
-
     uid = update.effective_user.id
+
+    # Получаем текст — поддерживаем и текст и голос
     comments = await get_text(update)
-    if not comments: return DOC_EDIT_CMT
+    if not comments:
+        # Если нет текста — ставим флаг обратно и ждём
+        context.user_data["waiting_doc_edit"] = True
+        await update.message.reply_text("Не расслышал. Напиши комментарии текстом.")
+        return
 
     doc_text = context.user_data.get("edit_doc_text", "")
     doc_name = context.user_data.get("edit_doc_name", "документ")
