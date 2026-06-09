@@ -145,7 +145,7 @@ class TenderAgent:
             f"Деловой стиль, русский язык. Фокус на работы и услуги (не товары). "
             f"Начни с заголовка 'ТЕХНИЧЕСКОЕ ЗАДАНИЕ'."
         )
-        return self._call(system, f"Данные закупки:\n\n{self._context()}", max_tokens=4000)
+        return self._call(system, f"Данные закупки:\n\n{self._context()}", max_tokens=8000)
 
     async def generate_criteria(self) -> str:
         examples = _get_criteria_examples()
