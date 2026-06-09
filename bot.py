@@ -1473,9 +1473,34 @@ async def save_last(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Ошибка.")
 
 async def cb_save_to_word(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    q = update.callback_query; await q.answer()
-    update.message = q.message
-    await save_last(update, context)
+    from docx_generator import generate_tz_docx
+    q = update.callback_query
+    await q.answer()
+    uid = update.effective_user.id
+    msgs_list = bot_msgs.get(uid, [])
+    content_text = msgs_list[-1] if msgs_list else None
+    if not content_text:
+        history = context.user_data.get("chat_history", [])
+        for m in reversed(history):
+            if m["role"] == "assistant" and isinstance(m["content"], str):
+                content_text = m["content"]; break
+    if not content_text:
+        await q.edit_message_text("Нечего сохранять.")
+        return
+    await q.edit_message_text("Сохраняю в Word...")
+    try:
+        path = await generate_tz_docx(content_text, "Dokument")
+        with open(path, "rb") as f2:
+            await context.bot.send_document(
+                chat_id=uid,
+                document=f2,
+                filename="Dokument.docx",
+                caption="Сохранено в Word!"
+            )
+        os.remove(path)
+    except Exception as e:
+        logger.error(f"SaveToWord: {e}", exc_info=True)
+        await q.message.reply_text("Ошибка при сохранении.")
 
 # ─── Запуск ──────────────────────────────────────────────────────────────────
 async def intent_or_doc_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
