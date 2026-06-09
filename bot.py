@@ -1411,37 +1411,35 @@ async def cb_save_to_word(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # ─── Запуск ──────────────────────────────────────────────────────────────────
 async def intent_or_doc_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Универсальный обработчик: намерения по тексту + файлы в чате.
-    Добавлен в entry_points и fallbacks ConversationHandler."""
+    """Обрабатывает намерения и файлы. Если намерение не найдено — передаёт в chat_handler."""
     uid = update.effective_user.id
     if not is_allowed(uid):
         await update.message.reply_text("Нет доступа.")
         return ConversationHandler.END
     save_user(uid, update.effective_user.username or "")
 
-    # Обработка документа (не фото)
+    # Документ (не фото) — обрабатываем сразу
     if update.message.document:
         mime = update.message.document.mime_type or ""
         fname = update.message.document.file_name or ""
-        is_image = mime.startswith("image/")
+        if mime.startswith("image/"):
+            await handle_photo(update, context)
+            return ConversationHandler.END
         is_text_doc = ("word" in mime or "pdf" in mime or "text" in mime or
                        fname.lower().endswith((".docx", ".doc", ".pdf", ".txt")))
         if is_text_doc:
             await handle_doc_in_chat(update, context)
             return ConversationHandler.END
-        if is_image:
-            await handle_photo(update, context)
-            return ConversationHandler.END
 
-    # Обработка текстовых намерений
+    # Только для текстовых сообщений — ищем намерения
     if update.message.text:
         text = update.message.text.strip()
-        # Навигация
+
         if "/new" in text:
             sessions.pop(uid, None); last_doc.pop(uid, None); context.user_data.clear()
             await update.message.reply_text("Что делаем?", reply_markup=menu_kb())
             return CHOOSING
-        # Намерения
+
         intent = detect_intent(text)
         if intent:
             sessions.pop(uid, None); last_doc.pop(uid, None); context.user_data.clear()
@@ -1452,6 +1450,8 @@ async def intent_or_doc_handler(update: Update, context: ContextTypes.DEFAULT_TY
                 return CHOOSING
             return ConversationHandler.END
 
+    # Намерение не найдено — передаём в обычный chat_handler
+    await chat_handler(update, context)
     return ConversationHandler.END
 
 def main():
