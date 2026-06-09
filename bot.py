@@ -38,6 +38,8 @@ LETTER_PHOTO = 9
 LETTER_TASK  = 10
 ANALYSIS_DOC = 11  # Ждём документ для анализа
 ANALYSIS_QA  = 12  # Уточняющие вопросы после анализа
+DOC_RECEIVED = 13  # Получили файл в чате, спрашиваем что делать
+DOC_EDIT_CMT = 14  # Ждём комментарии для редактуры
 
 sessions: dict[int, TenderAgent] = {}
 last_doc: dict[int, dict]        = {}
@@ -274,6 +276,14 @@ def letter_type_kb():
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("📩 Ответ на письмо", callback_data="letter_reply")],
         [InlineKeyboardButton("📝 Новое письмо", callback_data="letter_new")],
+    ])
+
+def doc_action_kb():
+    """Что делать с полученным документом."""
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🔎 Проанализировать (экспертиза)", callback_data="docact_analyze")],
+        [InlineKeyboardButton("✏️ Отредактировать (по комментариям)", callback_data="docact_edit")],
+        [InlineKeyboardButton("💬 Просто обсудить содержимое", callback_data="docact_discuss")],
     ])
 
 async def check_nav(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
@@ -1135,6 +1145,216 @@ async def analysis_followup(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return ANALYSIS_QA
 
 
+async def handle_doc_in_chat(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обрабатывает файл загруженный в свободный чат."""
+    uid = update.effective_user.id
+    doc = update.message.document
+    if not doc: return
+
+    fname = doc.file_name or "документ"
+    mime = doc.mime_type or ""
+
+    # Только текстовые документы — не изображения
+    is_text_doc = ("word" in mime or "pdf" in mime or "text" in mime or
+                   fname.lower().endswith((".docx", ".doc", ".pdf", ".txt")))
+    if not is_text_doc:
+        return  # Передаём обработку фото-обработчику
+
+    await update.message.reply_text("Читаю документ...")
+    doc_text = await extract_doc_text(update)
+
+    if not doc_text:
+        await update.message.reply_text(
+            "Не смог прочитать файл. Попробуй Word (.docx), PDF или txt."
+        )
+        return
+
+    # Сохраняем документ и спрашиваем что делать
+    context.user_data["received_doc_text"] = doc_text
+    context.user_data["received_doc_name"] = fname
+    remember(uid, doc_text[:500])
+
+    # Если пользователь до этого просил анализ — сразу анализируем
+    if context.user_data.pop("intent_analysis", False):
+        context.user_data["analysis_doc"] = doc_text
+        await update.message.reply_text("Провожу экспертизу, это займёт около минуты...")
+        class FakeUpdate:
+            message = update.message
+            effective_user = update.effective_user
+            callback_query = None
+        await do_analysis(FakeUpdate(), context)
+        return
+
+    await update.message.reply_text(
+        f"Получил: *{fname}*\n\nЧто с ним делаем?",
+        reply_markup=doc_action_kb(),
+        parse_mode="Markdown"
+    )
+
+
+async def cb_doc_action(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обрабатывает выбор действия с полученным документом."""
+    q = update.callback_query
+    await q.answer()
+    uid = update.effective_user.id
+    doc_text = context.user_data.get("received_doc_text", "")
+    doc_name = context.user_data.get("received_doc_name", "документ")
+
+    if not doc_text:
+        await q.edit_message_text("Документ не найден. Загрузи снова.")
+        return
+
+    if q.data == "docact_analyze":
+        # Запускаем анализ как из меню
+        context.user_data["analysis_doc"] = doc_text
+        await q.edit_message_text("Провожу экспертизу, это займёт около минуты...")
+
+        # Создаём временный update.message для do_analysis
+        class FakeUpdate:
+            message = q.message
+            effective_user = update.effective_user
+            callback_query = None
+
+        await do_analysis(FakeUpdate(), context)
+
+    elif q.data == "docact_edit":
+        context.user_data["edit_doc_text"] = doc_text
+        context.user_data["edit_doc_name"] = doc_name
+        await q.edit_message_text(
+            f"Документ *{doc_name}* готов к редактуре.\n\n"
+            "Напиши свои комментарии — что именно изменить, добавить или убрать:\n\n"
+            "_Например: 'Сделай тон более официальным', 'Добавь пункт про сроки', "
+            "'Убери раздел 3'_",
+            parse_mode="Markdown"
+        )
+        return DOC_EDIT_CMT
+
+    elif q.data == "docact_discuss":
+        # Добавляем документ в контекст чата
+        context.user_data["chat_doc_context"] = doc_text[:6000]
+        context.user_data["chat_history"] = [{
+            "role": "user",
+            "content": f"Я загрузил документ '{doc_name}'. Вот его содержимое:\n{doc_text[:6000]}"
+        }, {
+            "role": "assistant",
+            "content": f"Прочитал документ '{doc_name}'. Задавай вопросы — отвечу по его содержимому."
+        }]
+        await q.edit_message_text(
+            f"Документ *{doc_name}* загружен в контекст разговора.\n"
+            "Задавай любые вопросы по его содержимому!",
+            parse_mode="Markdown"
+        )
+
+
+async def apply_doc_edit(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Редактирует документ по комментариям пользователя."""
+    from docx_generator import generate_tz_docx
+    if await check_nav(update, context): return ConversationHandler.END
+
+    uid = update.effective_user.id
+    comments = await get_text(update)
+    if not comments: return DOC_EDIT_CMT
+
+    doc_text = context.user_data.get("edit_doc_text", "")
+    doc_name = context.user_data.get("edit_doc_name", "документ")
+
+    if not doc_text:
+        await update.message.reply_text("Документ не найден. Загрузи снова.")
+        return ConversationHandler.END
+
+    await update.message.reply_text("Редактирую документ по вашим комментариям...")
+
+    try:
+        response = claude.messages.create(
+            model="claude-sonnet-4-5",
+            max_tokens=4000,
+            system=(
+                "Ты помощник по редактуре документов. "
+                "Пользователь предоставил документ и комментарии по его доработке. "
+                "Внеси все указанные правки и верни ПОЛНЫЙ исправленный текст документа. "
+                "Сохрани структуру и стиль оригинала. Только текст документа."
+            ),
+            messages=[{
+                "role": "user",
+                "content": (
+                    f"Оригинальный документ:\n{doc_text}\n\n"
+                    f"Комментарии и правки:\n{comments}\n\n"
+                    f"Верни полный исправленный документ."
+                )
+            }]
+        )
+        new_content = response.content[0].text
+        remember(uid, new_content)
+        last_doc[uid] = {"content": new_content, "type": "edited", "name": doc_name}
+
+        path = await generate_tz_docx(new_content, doc_name)
+        with open(path, "rb") as f:
+            await context.bot.send_document(
+                chat_id=uid,
+                document=f,
+                filename=f"Edited_{doc_name[:30]}.docx",
+                caption=f"Документ отредактирован по вашим комментариям!"
+            )
+        os.remove(path)
+
+        kb = InlineKeyboardMarkup([
+            [InlineKeyboardButton("Ещё правки", callback_data="docact_edit_more")],
+            [InlineKeyboardButton("Всё отлично!", callback_data="docact_edit_done")],
+        ])
+        await update.message.reply_text("Устраивает результат?", reply_markup=kb)
+        return DOC_EDIT_CMT
+
+    except Exception as e:
+        logger.error(f"DocEdit: {e}", exc_info=True)
+        await update.message.reply_text("Ошибка при редактуре. Попробуй ещё раз.")
+        return DOC_EDIT_CMT
+
+
+async def cb_doc_edit_actions(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query; await q.answer()
+    if q.data == "docact_edit_more":
+        await q.edit_message_text("Напиши дополнительные правки:")
+        return DOC_EDIT_CMT
+    elif q.data == "docact_edit_done":
+        context.user_data.pop("edit_doc_text", None)
+        context.user_data.pop("edit_doc_name", None)
+        await q.edit_message_text("Отлично! Для нового запроса: /new")
+        return ConversationHandler.END
+
+
+def detect_intent(text: str) -> str | None:
+    """Определяет намерение пользователя по тексту."""
+    tl = text.lower()
+    # ТЗ
+    if any(w in tl for w in ["нужно тз", "нужно техническое задание", "сделай тз",
+                               "составь тз", "напиши тз", "подготовь тз",
+                               "нужно техзадание", "сделай техническое задание"]):
+        return "menu_tz"
+    # Критерии
+    if any(w in tl for w in ["нужны критерии", "критерии допуска", "составь критерии",
+                               "сделай критерии", "критерии участников"]):
+        return "menu_criteria"
+    # ТЗ + критерии
+    if any(w in tl for w in ["тз и критерии", "техзадание и критерии",
+                               "и тз и критерии", "тз с критериями"]):
+        return "menu_both"
+    # Переговоры
+    if any(w in tl for w in ["сценарий переговоров", "нужны переговоры",
+                               "подготовь переговоры", "скрипт переговоров",
+                               "сценарий для переговоров"]):
+        return "menu_negotiation"
+    # Анализ
+    if any(w in tl for w in ["проанализируй", "анализ документа", "проверь документ",
+                               "экспертиза тз", "проверь тз", "найди ошибки",
+                               "анализируй", "разбери документ"]):
+        return "menu_analysis"
+    # Письмо
+    if any(w in tl for w in ["напиши письмо", "составь письмо", "нужно письмо",
+                               "деловое письмо", "ответ на письмо"]):
+        return "menu_letter"
+    return None
+
+
 async def save_last(update: Update, context: ContextTypes.DEFAULT_TYPE):
     from docx_generator import generate_tz_docx
     uid = update.effective_user.id
@@ -1215,6 +1435,13 @@ def main():
                 CallbackQueryHandler(cb_analysis_actions,
                                      pattern="^(save_analysis|analysis_question|analysis_done)$"),
                 MessageHandler(tv, analysis_followup),
+            ],
+            DOC_RECEIVED: [
+                CallbackQueryHandler(cb_doc_action, pattern="^docact_"),
+            ],
+            DOC_EDIT_CMT: [
+                CallbackQueryHandler(cb_doc_edit_actions, pattern="^docact_edit_"),
+                MessageHandler(tv, apply_doc_edit),
             ],
         },
         fallbacks=[CommandHandler("cancel", cmd_cancel)],
