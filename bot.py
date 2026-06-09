@@ -641,15 +641,37 @@ async def text_answer(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
     text = await get_text(update)
     if not text: return ANSWERING
-    # Только /new и /cancel прерывают опрос
+
+    # /new всегда прерывает
     if text.strip() in ("/new", "/new — Новый документ"):
         sessions.pop(uid, None); last_doc.pop(uid, None); context.user_data.clear()
         await update.message.reply_text("Что делаем?", reply_markup=menu_kb())
         return ConversationHandler.END
+
     agent = sessions.get(uid)
+
+    # Если агент есть и ждёт текстовый ответ — отдаём ему
+    # Определяем: текущий вопрос без кнопок = свободный ввод (адрес, описание)
+    if agent and agent.last_question and not agent.last_question.get("options"):
+        return await _handle_answer(update, context, text)
+
+    # Если агент есть и вопрос с кнопками — это "свой вариант", тоже отдаём
+    if agent and agent.last_question and agent.last_question.get("options"):
+        return await _handle_answer(update, context, text)
+
+    # Агента нет — проверяем намерения
     if not agent:
-        await update.message.reply_text("Сессия устарела. /new")
+        intent = detect_intent(text)
+        if intent:
+            sessions.pop(uid, None); last_doc.pop(uid, None); context.user_data.clear()
+            await _handle_intent(update, context, intent)
+            if intent == "menu_negotiation": return NEGOTIATION
+            if intent in ("menu_tz", "menu_criteria", "menu_both"): return CHOOSING
+            return ConversationHandler.END
+        # Нет намерения — обычный чат
+        await chat_handler(update, context)
         return ConversationHandler.END
+
     return await _handle_answer(update, context, text)
 
 async def _handle_answer(update: Update, context: ContextTypes.DEFAULT_TYPE, answer: str):
@@ -1508,7 +1530,6 @@ def main():
             CommandHandler("new", cmd_new),
             CallbackQueryHandler(cb_menu, pattern="^menu_"),
             MessageHandler(doc_filter, intent_or_doc_handler),
-            MessageHandler(tv, intent_or_doc_handler),
         ],
         states={
             CHOOSING: [
@@ -1578,7 +1599,7 @@ def main():
             CommandHandler("new", cmd_new),
             MessageHandler(doc_filter, intent_or_doc_handler),
         ],
-        allow_reentry=False,
+        allow_reentry=True,
     )
 
     app.add_handler(CommandHandler("start",      cmd_start))
