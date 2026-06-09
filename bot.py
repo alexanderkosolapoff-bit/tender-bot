@@ -224,6 +224,61 @@ async def send_pdf(msg, path: str, filename: str, caption: str):
         await msg.reply_document(document=f, filename=filename, caption=caption)
     os.remove(path)
 
+def detect_intent(text: str) -> str | None:
+    """Определяет намерение пользователя по тексту."""
+    tl = text.lower()
+    if any(w in tl for w in ["нужно тз", "нужно техническое задание", "сделай тз",
+                               "составь тз", "напиши тз", "подготовь тз", "хочу тз",
+                               "нужно техзадание", "сделай техническое задание"]):
+        return "menu_tz"
+    if any(w in tl for w in ["нужны критерии", "критерии допуска", "составь критерии",
+                               "сделай критерии", "критерии участников", "хочу критерии"]):
+        return "menu_criteria"
+    if any(w in tl for w in ["тз и критерии", "техзадание и критерии",
+                               "и тз и критерии", "тз с критериями"]):
+        return "menu_both"
+    if any(w in tl for w in ["сценарий переговоров", "нужны переговоры",
+                               "подготовь переговоры", "скрипт переговоров",
+                               "сценарий для переговоров", "хочу переговоры"]):
+        return "menu_negotiation"
+    if any(w in tl for w in ["проанализируй", "анализ документа", "проверь документ",
+                               "экспертиза тз", "проверь тз", "найди ошибки",
+                               "анализируй", "разбери документ", "сделай анализ"]):
+        return "menu_analysis"
+    if any(w in tl for w in ["напиши письмо", "составь письмо", "нужно письмо",
+                               "деловое письмо", "ответ на письмо", "хочу письмо"]):
+        return "menu_letter"
+    return None
+
+
+async def _handle_intent(update, context, intent: str):
+    """Запускает нужный режим по распознанному намерению."""
+    uid = update.effective_user.id
+    sessions.pop(uid, None); last_doc.pop(uid, None); context.user_data.clear()
+    if intent == "menu_negotiation":
+        context.user_data["neg_answers"] = {}
+        context.user_data["neg_step"] = 0
+        await update.message.reply_text(
+            "Запускаю сценарий переговоров!\n\n" + NEGOTIATION_STEPS[0]["q"],
+            reply_markup=neg_kb(0)
+        )
+    elif intent == "menu_analysis":
+        context.user_data["intent_analysis"] = True
+        await update.message.reply_text(
+            "Загрузи проект ТЗ (Word, PDF или txt) - "
+            "найду ошибки, противоречия, завышенные требования "
+            "и дам конкретные предложения по исправлению."
+        )
+    elif intent == "menu_letter":
+        await update.message.reply_text("Что нужно?", reply_markup=letter_type_kb())
+    else:
+        doc_map = {"menu_tz": "tz_only", "menu_criteria": "criteria_only", "menu_both": "both"}
+        context.user_data["doc_type"] = doc_map.get(intent, "tz_only")
+        await update.message.reply_text(
+            "Выбери направление закупки:", reply_markup=dir_kb()
+        )
+
+
 def nav_kb():
     return ReplyKeyboardMarkup(
         [[KeyboardButton("/new — Новый документ"), KeyboardButton("/help — Помощь")]],
@@ -1322,38 +1377,6 @@ async def cb_doc_edit_actions(update: Update, context: ContextTypes.DEFAULT_TYPE
         return ConversationHandler.END
 
 
-def detect_intent(text: str) -> str | None:
-    """Определяет намерение пользователя по тексту."""
-    tl = text.lower()
-    # ТЗ
-    if any(w in tl for w in ["нужно тз", "нужно техническое задание", "сделай тз",
-                               "составь тз", "напиши тз", "подготовь тз",
-                               "нужно техзадание", "сделай техническое задание"]):
-        return "menu_tz"
-    # Критерии
-    if any(w in tl for w in ["нужны критерии", "критерии допуска", "составь критерии",
-                               "сделай критерии", "критерии участников"]):
-        return "menu_criteria"
-    # ТЗ + критерии
-    if any(w in tl for w in ["тз и критерии", "техзадание и критерии",
-                               "и тз и критерии", "тз с критериями"]):
-        return "menu_both"
-    # Переговоры
-    if any(w in tl for w in ["сценарий переговоров", "нужны переговоры",
-                               "подготовь переговоры", "скрипт переговоров",
-                               "сценарий для переговоров"]):
-        return "menu_negotiation"
-    # Анализ
-    if any(w in tl for w in ["проанализируй", "анализ документа", "проверь документ",
-                               "экспертиза тз", "проверь тз", "найди ошибки",
-                               "анализируй", "разбери документ"]):
-        return "menu_analysis"
-    # Письмо
-    if any(w in tl for w in ["напиши письмо", "составь письмо", "нужно письмо",
-                               "деловое письмо", "ответ на письмо"]):
-        return "menu_letter"
-    return None
-
 
 async def save_last(update: Update, context: ContextTypes.DEFAULT_TYPE):
     from docx_generator import generate_tz_docx
@@ -1462,6 +1485,7 @@ def main():
                                          pattern="^(save_analysis|analysis_question|analysis_done)$"))
     app.add_handler(CallbackQueryHandler(cb_save_to_word, pattern="^save_to_word$"))
     app.add_handler(MessageHandler(pf, chat_handler))
+    app.add_handler(MessageHandler(filters.Document.ALL, chat_handler))
     app.add_handler(MessageHandler(tv, chat_handler))
 
     logger.info("Bot v12 started")
