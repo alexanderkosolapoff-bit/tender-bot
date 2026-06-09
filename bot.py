@@ -1450,7 +1450,8 @@ async def cb_save_to_word(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # ─── Запуск ──────────────────────────────────────────────────────────────────
 async def intent_or_doc_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обрабатывает намерения и файлы. Если намерение не найдено — передаёт в chat_handler."""
+    """Обрабатывает намерения и файлы.
+    Вызывается из entry_points — только когда диалог НЕ активен."""
     uid = update.effective_user.id
     if not is_allowed(uid):
         await update.message.reply_text("Нет доступа.")
@@ -1470,7 +1471,7 @@ async def intent_or_doc_handler(update: Update, context: ContextTypes.DEFAULT_TY
             await handle_doc_in_chat(update, context)
             return ConversationHandler.END
 
-    # Только для текстовых сообщений — ищем намерения
+    # Текст — ищем намерения
     if update.message.text:
         text = update.message.text.strip()
 
@@ -1489,7 +1490,7 @@ async def intent_or_doc_handler(update: Update, context: ContextTypes.DEFAULT_TY
                 return CHOOSING
             return ConversationHandler.END
 
-    # Намерение не найдено — передаём в обычный chat_handler
+    # Нет намерения — обычный чат
     await chat_handler(update, context)
     return ConversationHandler.END
 
@@ -1507,6 +1508,7 @@ def main():
             CommandHandler("new", cmd_new),
             CallbackQueryHandler(cb_menu, pattern="^menu_"),
             MessageHandler(doc_filter, intent_or_doc_handler),
+            MessageHandler(tv, intent_or_doc_handler),
         ],
         states={
             CHOOSING: [
