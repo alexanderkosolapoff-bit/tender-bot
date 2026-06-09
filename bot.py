@@ -949,6 +949,13 @@ async def chat_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if any(w in tl for w in ["сохрани", "в ворд", "в word", "сделай файл"]):
         await save_last(update, context); return
 
+    # Намерения — запускаем нужный режим
+    intent = detect_intent(text)
+    if intent:
+        sessions.pop(uid, None); last_doc.pop(uid, None); context.user_data.clear()
+        await _handle_intent(update, context, intent)
+        return
+
     photo_ctx = context.user_data.get("last_photo_desc", "")
     system = CHAT_SYSTEM + (f"\n\nКонтекст фото: {photo_ctx}" if photo_ctx else "")
     history = context.user_data.get("chat_history", [])
