@@ -875,6 +875,12 @@ async def chat_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if any(w in tl for w in ["сохрани", "в ворд", "в word", "сделай файл"]):
         await save_last(update, context); return
 
+    # Ждём комментарии для редактуры документа
+    if context.user_data.get("waiting_doc_edit"):
+        context.user_data.pop("waiting_doc_edit")
+        await apply_doc_edit(update, context)
+        return
+
     # Проверяем ждём ли письмо по фото
     if context.user_data.get("waiting_photo_reply"):
         context.user_data.pop("waiting_photo_reply")
@@ -1275,14 +1281,12 @@ async def cb_doc_action(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif q.data == "docact_edit":
         context.user_data["edit_doc_text"] = doc_text
         context.user_data["edit_doc_name"] = doc_name
+        context.user_data["waiting_doc_edit"] = True
         await q.edit_message_text(
-            f"Документ *{doc_name}* готов к редактуре.\n\n"
-            "Напиши свои комментарии — что именно изменить, добавить или убрать:\n\n"
-            "_Например: 'Сделай тон более официальным', 'Добавь пункт про сроки', "
-            "'Убери раздел 3'_",
-            parse_mode="Markdown"
+            f"Документ '{doc_name}' готов к редактуре.\n\n"
+            "Напиши свои комментарии — что именно изменить, добавить или убрать.\n\n"
+            "Например: 'Сделай тон более официальным', 'Добавь пункт про сроки'",
         )
-        return DOC_EDIT_CMT
 
     elif q.data == "docact_discuss":
         # Добавляем документ в контекст чата
@@ -1357,12 +1361,10 @@ async def apply_doc_edit(update: Update, context: ContextTypes.DEFAULT_TYPE):
             [InlineKeyboardButton("Всё отлично!", callback_data="docact_edit_done")],
         ])
         await update.message.reply_text("Устраивает результат?", reply_markup=kb)
-        return DOC_EDIT_CMT
 
     except Exception as e:
         logger.error(f"DocEdit: {e}", exc_info=True)
         await update.message.reply_text("Ошибка при редактуре. Попробуй ещё раз.")
-        return DOC_EDIT_CMT
 
 
 async def cb_doc_edit_actions(update: Update, context: ContextTypes.DEFAULT_TYPE):
