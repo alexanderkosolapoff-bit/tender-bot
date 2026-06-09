@@ -797,9 +797,13 @@ async def cb_review(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def apply_edits(update: Update, context: ContextTypes.DEFAULT_TYPE):
     from docx_generator import generate_tz_docx, generate_criteria_docx
-    if await check_nav(update, context): return ConversationHandler.END
     uid = update.effective_user.id
     edits = await get_text(update)
+    if not edits: return REVIEWING
+    if edits.strip() in ("/new", "/new — Новый документ"):
+        sessions.pop(uid, None); last_doc.pop(uid, None); context.user_data.clear()
+        await update.message.reply_text("Что делаем?", reply_markup=menu_kb())
+        return ConversationHandler.END
     doc_info = last_doc.get(uid, {})
     if not doc_info: await update.message.reply_text("Не нашёл документ. /new"); return ConversationHandler.END
     await update.message.reply_text("Вношу правки...")
@@ -838,9 +842,14 @@ async def cb_neg_answer(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return await _save_neg(q.message, context, step, answer)
 
 async def neg_text_answer(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if await check_nav(update, context): return ConversationHandler.END
     text = await get_text(update)
     if not text: return NEGOTIATION
+    # Только /new прерывает
+    if text.strip() in ("/new", "/new — Новый документ"):
+        uid = update.effective_user.id
+        sessions.pop(uid, None); last_doc.pop(uid, None); context.user_data.clear()
+        await update.message.reply_text("Что делаем?", reply_markup=menu_kb())
+        return ConversationHandler.END
     step = context.user_data.pop("neg_custom_step", context.user_data.get("neg_step", 0))
     return await _save_neg(update.message, context, step, text)
 
@@ -1514,7 +1523,9 @@ def main():
             ],
             ANSWERING: [
                 CallbackQueryHandler(cb_answer, pattern="^ans_"),
+                # Документы обрабатываем отдельно
                 MessageHandler(doc_filter, intent_or_doc_handler),
+                # Текст ВСЕГДА идёт в text_answer когда бот задаёт вопросы
                 MessageHandler(tv, text_answer),
             ],
             CRITERIA_Q: [
