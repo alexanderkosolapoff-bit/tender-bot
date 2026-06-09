@@ -638,12 +638,18 @@ async def cb_answer(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return await _handle_answer(update, context, answer)
 
 async def text_answer(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if await check_nav(update, context): return ConversationHandler.END
     uid = update.effective_user.id
-    agent = sessions.get(uid)
-    if not agent: await update.message.reply_text("Сессия устарела. /new"); return ConversationHandler.END
     text = await get_text(update)
     if not text: return ANSWERING
+    # Только /new и /cancel прерывают опрос
+    if text.strip() in ("/new", "/new — Новый документ"):
+        sessions.pop(uid, None); last_doc.pop(uid, None); context.user_data.clear()
+        await update.message.reply_text("Что делаем?", reply_markup=menu_kb())
+        return ConversationHandler.END
+    agent = sessions.get(uid)
+    if not agent:
+        await update.message.reply_text("Сессия устарела. /new")
+        return ConversationHandler.END
     return await _handle_answer(update, context, text)
 
 async def _handle_answer(update: Update, context: ContextTypes.DEFAULT_TYPE, answer: str):
