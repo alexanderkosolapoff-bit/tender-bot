@@ -349,6 +349,7 @@ def dir_kb():
         [InlineKeyboardButton("🧹 Клининговые услуги", callback_data="dir_cleaning")],
         [InlineKeyboardButton("💻 IT-услуги и автоматизация", callback_data="dir_it")],
         [InlineKeyboardButton("🔧 Ремонт и техобслуживание", callback_data="dir_repair")],
+        [InlineKeyboardButton("✏️ Свой вариант", callback_data="dir_custom")],
     ])
 
 def hasdoc_kb():
@@ -525,9 +526,14 @@ async def cb_letter_type(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await q.edit_message_text("Отправь фото письма или загрузи файл (Word/PDF/txt).\nИли напиши текст письма вручную:")
         return LETTER_PHOTO
     else:
-        context.user_data["letter_mode"] = "new"; context.user_data["letter_original"] = ""
-        await q.edit_message_text("Расскажи что написать — кому, по какому поводу, что сообщить:")
-        return LETTER_TASK
+        context.user_data["letter_mode"] = "new"
+        context.user_data["letter_original"] = ""
+        await q.edit_message_text(
+            "Есть черновик письма? Если да — загрузи файл или вставь текст, "
+            "я его доработаю.\n\nЕсли черновика нет — напиши кому, о чём и что сообщить:"
+        )
+        context.user_data["letter_waiting_draft"] = True
+        return LETTER_PHOTO
 
 async def receive_letter_original(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if await check_nav(update, context): return ConversationHandler.END
@@ -575,9 +581,11 @@ async def receive_letter_task(update: Update, context: ContextTypes.DEFAULT_TYPE
     await update.message.reply_text("Составляю письмо...")
     try:
         if mode == "reply" and original:
-            prompt = f"Оригинальное письмо:\n{original}\n\nЗадание: {task}\n\nСоставь ответное письмо."
+            prompt = "Оригинальное письмо:\n" + original + "\n\nКомментарий: " + task + "\n\nСоставь профессиональный ответ с учётом комментария."
+        elif mode == "edit_draft" and original:
+            prompt = "Черновик письма:\n" + original + "\n\nКомментарий по доработке: " + task + "\n\nДоработай письмо с учётом комментария. Верни полный текст готового письма."
         else:
-            prompt = f"Задание: {task}\n\nСоставь деловое письмо."
+            prompt = "Задание: " + task + "\n\nСоставь профессиональное деловое письмо."
         resp = claude.messages.create(
             model="claude-sonnet-4-5", max_tokens=2000, system=LETTER_SYSTEM,
             messages=[{"role": "user", "content": prompt}]
@@ -595,8 +603,22 @@ async def receive_letter_task(update: Update, context: ContextTypes.DEFAULT_TYPE
 # ─── Направление и вопросы ───────────────────────────────────────────────────
 async def cb_direction(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query; await q.answer()
-    context.user_data["direction"] = q.data.replace("dir_", "")
-    await q.edit_message_text("Есть документ от заказчика? (ТЗ-черновик, письмо)\nЕсли да — загрузи, задам только недостающие вопросы.", reply_markup=hasdoc_kb())
+    direction = q.data.replace("dir_", "")
+
+    if direction == "custom":
+        await q.edit_message_text(
+            "Напиши направление закупки своими словами\n"
+            "(например: охрана объектов, вывоз мусора, обслуживание лифтов):"
+        )
+        context.user_data["waiting_custom_direction"] = True
+        return CHOOSING
+
+    context.user_data["direction"] = direction
+    await q.edit_message_text(
+        "Есть документ от заказчика? (ТЗ-черновик, письмо)\n"
+        "Если да — загрузи, задам только недостающие вопросы.",
+        reply_markup=hasdoc_kb()
+    )
     return CHOOSING
 
 async def cb_hasdoc(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -642,9 +664,34 @@ async def receive_customer_doc(update: Update, context: ContextTypes.DEFAULT_TYP
     await send_q(update.message, result)
     return ANSWERING
 
+async def receive_custom_direction(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Получает свободный текст направления закупки."""
+    if not context.user_data.get("waiting_custom_direction"):
+        # Не ждём направление — передаём в обычный чат
+        await chat_handler(update, context)
+        return ConversationHandler.END
+
+    context.user_data.pop("waiting_custom_direction")
+    custom_dir = update.message.text.strip()
+
+    # Используем "custom" как direction с сохранением текста
+    context.user_data["direction"] = "custom"
+    context.user_data["custom_direction_name"] = custom_dir
+
+    await update.message.reply_text(
+        f"Отлично! Буду искать примеры по направлению: {custom_dir}\n\n"
+        "Есть документ от заказчика?",
+        reply_markup=hasdoc_kb()
+    )
+    return CHOOSING
+
+
 async def _start_questions(msg, context: ContextTypes.DEFAULT_TYPE):
     uid = msg.chat_id
-    agent = TenderAgent(direction=context.user_data.get("direction","cleaning"), doc_type=context.user_data.get("doc_type","tz_only"))
+    direction = context.user_data.get("direction", "cleaning")
+    doc_type = context.user_data.get("doc_type", "tz_only")
+    custom_name = context.user_data.get("custom_direction_name", "")
+    agent = TenderAgent(direction=direction, doc_type=doc_type, custom_name=custom_name)
     sessions[uid] = agent
     result = await agent.get_next_question()
     await send_q(msg, result)
@@ -761,15 +808,19 @@ async def _gen_criteria(msg, uid: int, agent: TenderAgent, context: ContextTypes
         examples_block = "ПРИМЕРЫ КРИТЕРИЕВ ИЗ РЕАЛЬНЫХ ТЕНДЕРОВ:\n\n"
         for i, t in enumerate(examples_texts[:5], 1):
             examples_block += f"=== Пример {i} ===\n{t[:3000]}\n\n"
+    custom_dir = context.user_data.get("custom_direction_name", "")
+    direction_hint = f"Направление: {custom_dir}" if custom_dir else ""
+
     system = (
-        f"Ты эксперт по тендерам и закупкам.\n\n"
-        f"{examples_block}"
-        f"Составь критерии допуска участников. Используй примеры как образец по уровню детализации.\n\n"
-        f"Для каждого критерия строго в формате:\n"
-        f"КРИТЕРИЙ: [краткое название]\n"
-        f"ТРЕБОВАНИЕ: [конкретное измеримое требование]\n"
-        f"ДОКУМЕНТ: [что предоставить]\n\n"
-        f"Составь 6-10 критериев. Только список, без заголовков."
+        "Ты эксперт по коммерческим закупкам работ и услуг.\n\n"
+        + (examples_block if examples_block else "") +
+        "Составь критерии допуска участников. Используй примеры как образец по уровню детализации.\n\n"
+        + (direction_hint + "\n\n" if direction_hint else "") +
+        "Для каждого критерия строго в формате:\n"
+        "КРИТЕРИЙ: [краткое название]\n"
+        "ТРЕБОВАНИЕ: [конкретное измеримое требование]\n"
+        "ДОКУМЕНТ: [что предоставить]\n\n"
+        "Составь 6-10 критериев. Только список, без заголовков."
     )
     try:
         await msg.reply_text("Генерирую критерии допуска...")
@@ -1290,14 +1341,17 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         remember(uid, final)
         await update.message.reply_text(final)
 
-        # Если похоже на письмо — предлагаем ответ
+        # Если похоже на письмо — спрашиваем что делать
         all_text = (desc + ocr).lower()
-        if any(w in all_text for w in ["уважаем", "прошу", "сообщаем", "исх.", "вх.", "направляем"]):
+        if any(w in all_text for w in ["уважаем", "прошу", "сообщаем", "исх.", "вх.", "направляем", "настоящим"]):
+            context.user_data["last_photo_text"] = ocr if ocr and ocr != "текста нет" else desc
             await update.message.reply_text(
-                "Похоже на официальное письмо. Составить ответ?",
-                reply_markup=InlineKeyboardMarkup([[
-                    InlineKeyboardButton("✉️ Составить ответ", callback_data="photo_write_reply")
-                ]])
+                "Похоже на официальное письмо. Что сделать с ним?",
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton("✉️ Написать ответ", callback_data="photo_act_reply")],
+                    [InlineKeyboardButton("✏️ Отредактировать", callback_data="photo_act_edit")],
+                    [InlineKeyboardButton("🔎 Проанализировать", callback_data="photo_act_analyze")],
+                ])
             )
     except Exception as e:
         logger.error(f"Photo: {e}", exc_info=True)
@@ -1307,6 +1361,21 @@ async def cb_photo_reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query; await q.answer()
     await q.edit_message_text("Напиши что именно ответить в письме:")
     context.user_data["waiting_photo_reply"] = True
+
+async def cb_photo_action(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обрабатывает выбор действия с письмом на фото."""
+    q = update.callback_query
+    await q.answer()
+    action = q.data.replace("photo_act_", "")
+    context.user_data["photo_action"] = action
+    context.user_data["waiting_photo_reply"] = True
+    if action == "reply":
+        await q.edit_message_text("Напиши комментарий — что ответить, какой тон, что включить:")
+    elif action == "edit":
+        await q.edit_message_text("Напиши комментарий — что изменить, добавить или убрать:")
+    elif action == "analyze":
+        await q.edit_message_text("Напиши на что обратить внимание (или просто 'анализируй'):")
+
 
 async def gen_letter_from_photo(update: Update, context: ContextTypes.DEFAULT_TYPE, task: str):
     from docx_generator import generate_tz_docx
@@ -1513,19 +1582,55 @@ async def handle_doc_in_chat(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
     fname = doc.file_name or "документ"
     mime = doc.mime_type or ""
+    logger.info(f"Doc received: fname={fname}, mime={mime}")
 
     # Только текстовые документы — не изображения
     is_text_doc = ("word" in mime or "pdf" in mime or "text" in mime or
+                   "octet-stream" in mime or
                    fname.lower().endswith((".docx", ".doc", ".pdf", ".txt")))
     if not is_text_doc:
-        return  # Передаём обработку фото-обработчику
+        return
 
     await update.message.reply_text("Читаю документ...")
-    doc_text = await extract_doc_text(update)
+
+    # Пробуем напрямую скачать и прочитать
+    try:
+        file = await doc.get_file()
+        data = bytes(await file.download_as_bytearray())
+        doc_text = None
+
+        if fname.lower().endswith(".docx") or "word" in mime:
+            from docx import Document as D
+            import tempfile, os as os2
+            tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".docx")
+            tmp.write(data); tmp.close()
+            try:
+                d = D(tmp.name)
+                doc_text = "\n".join(p.text for p in d.paragraphs if p.text.strip())
+            finally:
+                os2.remove(tmp.name)
+        elif fname.lower().endswith(".pdf") or "pdf" in mime:
+            from pypdf import PdfReader
+            import tempfile, os as os2, io
+            tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".pdf")
+            tmp.write(data); tmp.close()
+            try:
+                doc_text = "\n".join(p.extract_text() or "" for p in PdfReader(tmp.name).pages).strip()
+            finally:
+                os2.remove(tmp.name)
+        elif fname.lower().endswith(".txt") or "text" in mime:
+            doc_text = data.decode("utf-8", errors="replace").strip()
+
+        if not doc_text:
+            doc_text = await extract_doc_text(update)
+
+    except Exception as e:
+        logger.error(f"Doc read error: {e}", exc_info=True)
+        doc_text = await extract_doc_text(update)
 
     if not doc_text:
         await update.message.reply_text(
-            "Не смог прочитать файл. Попробуй Word (.docx), PDF или txt."
+            "Не смог прочитать файл.\nПопробуй сохранить как .docx (не .doc) или .txt"
         )
         return
 
@@ -1798,6 +1903,7 @@ def main():
                 CallbackQueryHandler(cb_direction,  pattern="^dir_"),
                 CallbackQueryHandler(cb_hasdoc,     pattern="^hasdoc_"),
                 MessageHandler(doc_filter, intent_or_doc_handler),
+                MessageHandler(tv, receive_custom_direction),
             ],
             WAITING_DOC: [
                 MessageHandler(df, receive_customer_doc),
@@ -1873,6 +1979,7 @@ def main():
     app.add_handler(CommandHandler("removeuser", cmd_removeuser))
     app.add_handler(conv)
     app.add_handler(CallbackQueryHandler(cb_photo_reply,      pattern="^photo_write_reply$"))
+    app.add_handler(CallbackQueryHandler(cb_photo_action,      pattern="^photo_act_"))
     app.add_handler(CallbackQueryHandler(cb_analysis_actions,  pattern="^(save_analysis|analysis_question|analysis_done)$"))
     app.add_handler(CallbackQueryHandler(cb_save_to_word,      pattern="^save_to_word$"))
     app.add_handler(CallbackQueryHandler(cb_doc_edit_actions,  pattern="^docact_edit_"))
