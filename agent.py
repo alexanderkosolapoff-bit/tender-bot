@@ -94,11 +94,14 @@ def _get_criteria_examples() -> str:
 
 
 class TenderAgent:
-    def __init__(self, direction: str = "cleaning", doc_type: str = "tz_only"):
+    def __init__(self, direction: str = "cleaning", doc_type: str = "tz_only",
+                 custom_name: str = ""):
         self.direction   = direction
         self.doc_type    = doc_type
-        self.tender_name = DIRECTION_NAMES.get(direction, direction)
-        self.questions   = list(QUESTIONS.get(direction, []))
+        self.tender_name = custom_name if custom_name else DIRECTION_NAMES.get(direction, direction)
+        # Для custom direction используем вопросы cleaning как базу
+        base_dir = direction if direction in QUESTIONS else "cleaning"
+        self.questions   = list(QUESTIONS.get(base_dir, []))
         self.answers:    list[dict] = []
         self.current_q   = 0
         self.last_question: dict = {}
