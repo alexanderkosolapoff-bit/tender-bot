@@ -891,8 +891,44 @@ async def cb_neg_answer(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await q.edit_message_text(NEGOTIATION_STEPS[step]["q"] + "\n\nВведи свой вариант:")
         context.user_data["neg_custom_step"] = step; return NEGOTIATION
     answer = NEGOTIATION_STEPS[step]["opts"][int(choice)]
-    await q.edit_message_text(f"{NEGOTIATION_STEPS[step]['q']}\n> {answer}")
+    await q.edit_message_text(NEGOTIATION_STEPS[step]["q"] + "\n> " + answer)
     return await _save_neg(q.message, context, step, answer)
+
+async def cb_neg_answer_global(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Глобальный обработчик кнопок переговоров — для голосового режима."""
+    if not context.user_data.get("voice_negotiation"):
+        return  # Не в голосовом режиме — игнорируем
+    q = update.callback_query; await q.answer()
+    parts = q.data.split("_"); step = int(parts[1]); choice = parts[2]
+    if choice == "custom":
+        await q.edit_message_text(NEGOTIATION_STEPS[step]["q"] + "\n\nВведи свой вариант:")
+        context.user_data["neg_custom_step"] = step
+        return
+    answer = NEGOTIATION_STEPS[step]["opts"][int(choice)]
+    await q.edit_message_text(NEGOTIATION_STEPS[step]["q"] + "\n> " + answer)
+    await _save_neg_global(q.message, context, step, answer)
+
+async def _save_neg_global(msg, context, step: int, answer: str):
+    """Сохраняет ответ на шаг переговоров в глобальном режиме."""
+    answers = context.user_data.setdefault("neg_answers", {})
+    answers[step] = {"q": NEGOTIATION_STEPS[step]["q"], "a": answer}
+    next_step = step + 1
+    context.user_data["neg_step"] = next_step
+    if next_step < len(NEGOTIATION_STEPS):
+        await msg.reply_text(NEGOTIATION_STEPS[next_step]["q"], reply_markup=neg_kb(next_step))
+    else:
+        context.user_data.pop("voice_negotiation", None)
+        await msg.reply_text("Составляю сценарий переговоров...")
+        await _gen_negotiation(msg, context)
+
+async def neg_text_global(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Глобальный обработчик текста в переговорах — для голосового режима."""
+    if not context.user_data.get("voice_negotiation"):
+        return
+    text = await get_text(update)
+    if not text: return
+    step = context.user_data.pop("neg_custom_step", context.user_data.get("neg_step", 0))
+    await _save_neg_global(update.message, context, step, text)
 
 async def neg_text_answer(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = await get_text(update)
@@ -1034,8 +1070,10 @@ async def handle_voice_smart(update, context, transcribed_text: str):
                 context.user_data["neg_step"] = len(NEGOTIATION_STEPS)
                 await update.message.reply_text("Составляю сценарий переговоров...")
                 await _gen_negotiation(update.message, context)
+                context.user_data["voice_mode_done"] = True
             else:
                 context.user_data["neg_step"] = next_step
+                context.user_data["voice_negotiation"] = True
                 filled = len(neg_answers)
                 await update.message.reply_text(
                     "Понял! Заполнил " + str(filled) + " из " + str(len(NEGOTIATION_STEPS)) + " параметров из голосового.\n\n" + NEGOTIATION_STEPS[next_step]["q"],
@@ -1045,6 +1083,7 @@ async def handle_voice_smart(update, context, transcribed_text: str):
             # Нет параметров — запускаем с нуля
             context.user_data["neg_answers"] = {}
             context.user_data["neg_step"] = 0
+            context.user_data["voice_negotiation"] = True
             await update.message.reply_text(
                 "Запускаю переговоры!\n\n" + NEGOTIATION_STEPS[0]["q"],
                 reply_markup=neg_kb(0)
@@ -1838,6 +1877,9 @@ def main():
     app.add_handler(CallbackQueryHandler(cb_save_to_word,      pattern="^save_to_word$"))
     app.add_handler(CallbackQueryHandler(cb_doc_edit_actions,  pattern="^docact_edit_"))
     app.add_handler(CallbackQueryHandler(cb_doc_action,        pattern="^docact_"))
+    # Глобальный handler кнопок переговоров для голосового режима
+    app.add_handler(CallbackQueryHandler(cb_neg_answer_global, pattern="^neg_"))
+    # neg_text_global вызывается из chat_handler через флаг voice_negotiation
     app.add_handler(MessageHandler(pf, chat_handler))
     app.add_handler(MessageHandler(filters.Document.ALL, chat_handler))
     app.add_handler(MessageHandler(tv, chat_handler))
