@@ -54,59 +54,67 @@ def _is_criteria(content: str) -> bool:
 
 
 def parse_criteria(text: str) -> list[dict]:
-    """Парсит текст в формате КРИТЕРИЙ/ТРЕБОВАНИЕ/ДОКУМЕНТ."""
+    """Парсит текст в формате КРИТЕРИЙ/ТРЕБОВАНИЕ/ДОКУМЕНТ.
+    Устойчив к markdown (**), нумерации в начале, разному регистру."""
     rows = []
     current = {}
     num = 1
 
-    for line in text.strip().split("\n"):
-        s = line.strip()
-        if not s:
-            if current.get("criterion"):
-                rows.append({
-                    "num": str(num),
-                    "criterion": current.get("criterion", ""),
-                    "requirement": current.get("requirement", current.get("criterion", "")),
-                    "document": current.get("document", "По запросу организатора"),
-                })
-                num += 1
-                current = {}
+    def flush():
+        nonlocal current, num
+        if current.get("criterion"):
+            rows.append({
+                "num": str(num),
+                "criterion": current.get("criterion", ""),
+                "requirement": current.get("requirement", current.get("criterion", "")),
+                "document": current.get("document", "По запросу организатора"),
+            })
+            num += 1
+            current = {}
+
+    def clean(s):
+        # Убираем markdown ** и * по краям
+        s = s.strip()
+        s = re.sub(r"^\*+|\*+$", "", s).strip()
+        return s
+
+    for raw_line in text.strip().split("\n"):
+        line = raw_line.strip()
+        if not line:
+            flush()
             continue
 
-        up = s.upper()
-        if up.startswith("КРИТЕРИЙ:"):
-            if current.get("criterion"):
-                rows.append({
-                    "num": str(num),
-                    "criterion": current.get("criterion", ""),
-                    "requirement": current.get("requirement", current.get("criterion", "")),
-                    "document": current.get("document", "По запросу организатора"),
-                })
-                num += 1
-            current = {"criterion": s.split(":", 1)[1].strip()}
-        elif up.startswith("ТРЕБОВАНИЕ:"):
-            current["requirement"] = s.split(":", 1)[1].strip()
-        elif up.startswith("ДОКУМЕНТ:"):
-            current["document"] = s.split(":", 1)[1].strip()
+        # Убираем нумерацию в начале: "1.", "1)", "1.1."
+        line_clean = re.sub(r"^\d+[.)]+\s*", "", line).strip()
+        # Убираем markdown ** в начале
+        line_no_md = re.sub(r"^\*+", "", line_clean).strip()
+
+        up = line_no_md.upper()
+
+        # Ищем ключевое слово в первых 30 символах строки
+        head = up[:40]
+
+        if "КРИТЕРИЙ" in head and ":" in line_no_md:
+            flush()
+            val = line_no_md.split(":", 1)[1]
+            current = {"criterion": clean(val)}
+        elif "ТРЕБОВАНИЕ" in head and ":" in line_no_md:
+            val = line_no_md.split(":", 1)[1]
+            current["requirement"] = clean(val)
+        elif ("ДОКУМЕНТ" in head or "ПОДТВЕРЖД" in head) and ":" in line_no_md:
+            val = line_no_md.split(":", 1)[1]
+            current["document"] = clean(val)
         else:
-            # Fallback: нумерованный список
-            m = re.match(r'^(\d+)[.)]\s*(.+)', s)
-            if m and not current:
-                rows.append({
-                    "num": m.group(1),
-                    "criterion": _strip_md(m.group(2)),
-                    "requirement": _strip_md(m.group(2)),
-                    "document": "По запросу организатора",
-                })
+            # Продолжение текущего поля — приписываем
+            if current:
+                last_key = None
+                if "document" in current: last_key = "document"
+                elif "requirement" in current: last_key = "requirement"
+                elif "criterion" in current: last_key = "criterion"
+                if last_key:
+                    current[last_key] += " " + clean(line)
 
-    if current.get("criterion"):
-        rows.append({
-            "num": str(num),
-            "criterion": current.get("criterion", ""),
-            "requirement": current.get("requirement", current.get("criterion", "")),
-            "document": current.get("document", "По запросу организатора"),
-        })
-
+    flush()
     return rows
 
 
