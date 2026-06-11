@@ -118,25 +118,62 @@ def parse_criteria(text: str) -> list[dict]:
     return rows
 
 
+def _is_table_row(s):
+    """Строка markdown-таблицы: | a | b | c |"""
+    return s.startswith("|") and s.count("|") >= 2
+
+def _is_table_sep(s):
+    """Разделитель шапки: |---|---|---|"""
+    return bool(re.match(r'^\|[\s:|-]+\|?$', s)) and "-" in s
+
+def _parse_table_row(s):
+    """Разбивает | a | b | c | на [a, b, c]"""
+    parts = s.strip().strip("|").split("|")
+    return [_strip_md(p.strip()) for p in parts]
+
 def parse_content(text: str) -> list[dict]:
-    """Парсит обычный текст (ТЗ, сценарий) в элементы."""
+    """Парсит текст (ТЗ, сценарий) в элементы, включая markdown-таблицы."""
     els = []
-    for line in text.strip().split("\n"):
-        s = line.strip()
-        if not s:                             els.append({"type": "space"}); continue
-        if re.match(r'^[-*]{3,}$', s):        els.append({"type": "divider"}); continue
-        if s.startswith("### "):              els.append({"type": "h3", "text": _strip_md(s[4:])}); continue
-        if s.startswith("## "):               els.append({"type": "h2", "text": _strip_md(s[3:])}); continue
-        if s.startswith("# "):                els.append({"type": "h1", "text": _strip_md(s[2:])}); continue
-        if s.startswith("> "):                els.append({"type": "quote", "text": _strip_md(s[2:])}); continue
-        if re.match(r'^[-*•]\s', s):          els.append({"type": "bullet", "text": _strip_md(s[2:])}); continue
+    lines = text.strip().split("\n")
+    i = 0
+    while i < len(lines):
+        s = lines[i].strip()
+
+        # Markdown таблица: несколько строк подряд начинающихся с |
+        if _is_table_row(s):
+            table_lines = []
+            while i < len(lines) and _is_table_row(lines[i].strip()):
+                table_lines.append(lines[i].strip())
+                i += 1
+            # Парсим: первая строка = шапка, вторая = разделитель (пропускаем), остальное = данные
+            if len(table_lines) >= 2:
+                header = _parse_table_row(table_lines[0])
+                data_rows = []
+                for tl in table_lines[1:]:
+                    if _is_table_sep(tl):
+                        continue
+                    data_rows.append(_parse_table_row(tl))
+                els.append({"type": "table", "header": header, "rows": data_rows})
+                continue
+            else:
+                # Одна строка — не таблица, обычный текст
+                els.append({"type": "body", "text": _strip_md(table_lines[0].strip("|"))})
+                continue
+
+        if not s:                             els.append({"type": "space"}); i += 1; continue
+        if re.match(r'^[-*]{3,}$', s):        els.append({"type": "divider"}); i += 1; continue
+        if s.startswith("### "):              els.append({"type": "h3", "text": _strip_md(s[4:])}); i += 1; continue
+        if s.startswith("## "):               els.append({"type": "h2", "text": _strip_md(s[3:])}); i += 1; continue
+        if s.startswith("# "):                els.append({"type": "h1", "text": _strip_md(s[2:])}); i += 1; continue
+        if s.startswith("> "):                els.append({"type": "quote", "text": _strip_md(s[2:])}); i += 1; continue
+        if re.match(r'^[-*•]\s', s):          els.append({"type": "bullet", "text": _strip_md(s[2:])}); i += 1; continue
         m = re.match(r'^(\d+)\.\s+(.+)', s)
-        if m and len(s) < 200:                els.append({"type": "numbered", "num": m.group(1), "text": _strip_md(m.group(2))}); continue
+        if m and len(s) < 200:                els.append({"type": "numbered", "num": m.group(1), "text": _strip_md(m.group(2))}); i += 1; continue
         if s.startswith("**") and (":**" in s or s.endswith("**")):
-                                              els.append({"type": "h3", "text": s.strip("*").rstrip(":")}); continue
+                                              els.append({"type": "h3", "text": s.strip("*").rstrip(":")}); i += 1; continue
         if re.match(r'^(ТЕХНИЧЕСКОЕ ЗАДАНИЕ|СЦЕНАРИЙ|ОТВЕТН)', s, re.I):
-                                              els.append({"type": "title", "text": _strip_md(s)}); continue
-        els.append({"type": "body", "text": _strip_md(s)})
+                                              els.append({"type": "title", "text": _strip_md(s)}); i += 1; continue
+        els.append({"type": "body", "text": _strip_md(s)}); i += 1
     return els
 
 
@@ -204,6 +241,40 @@ def _build_elements_docx(doc, elements):
             p = doc.add_paragraph(el["text"]); p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
             p.paragraph_format.first_line_indent = Cm(1.25)
             for r in p.runs: r.font.name = "Times New Roman"; r.font.size = Pt(12)
+        elif t == "table":
+            _build_generic_table(doc, el["header"], el["rows"])
+
+def _build_generic_table(doc, header, rows):
+    """Универсальная таблица для ТЗ — синяя шапка, чередующиеся строки."""
+    if not header:
+        return
+    ncols = len(header)
+    table = doc.add_table(rows=1, cols=ncols)
+    table.style = "Table Grid"
+
+    # Шапка — синий фон, белый текст
+    hdr = table.rows[0]
+    for i, h in enumerate(header):
+        cell = hdr.cells[i]
+        _cell_bg(cell, "1F5C99")
+        p = cell.paragraphs[0]; p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        _r(p, h, bold=True, size=10, color=(255, 255, 255))
+
+    # Данные — чередующиеся строки
+    for idx, row in enumerate(rows):
+        tr = table.add_row()
+        bg = "FFFFFF" if idx % 2 == 0 else "EEF4FB"
+        for i in range(ncols):
+            cell = tr.cells[i]
+            _cell_bg(cell, bg)
+            val = row[i] if i < len(row) else ""
+            p = cell.paragraphs[0]
+            # Первая колонка по центру (обычно номер), остальные слева
+            p.alignment = WD_ALIGN_PARAGRAPH.CENTER if i == 0 else WD_ALIGN_PARAGRAPH.LEFT
+            _r(p, val, size=10)
+
+    doc.add_paragraph()
+
 
 def _build_criteria_docx(doc, rows):
     """Таблица критериев в Word."""
@@ -402,6 +473,53 @@ async def generate_pdf(content, name):
             elif t == "quote":  story.append(Paragraph(f"«{text}»", st["quote"]))
             elif t == "body" and text.strip():
                 story.append(Paragraph(text, st["body"]))
+            elif t == "table":
+                _build_generic_table_pdf(story, el["header"], el["rows"], st, safe)
 
     doc.build(story)
     return tmp.name
+
+
+def _build_generic_table_pdf(story, header, rows, st, safe):
+    """Универсальная таблица в PDF."""
+    from reportlab.platypus import Table, TableStyle, Paragraph, Spacer
+    from reportlab.lib.colors import HexColor
+    from reportlab.lib.units import cm
+    from reportlab.lib.styles import ParagraphStyle
+    from reportlab.lib.enums import TA_CENTER, TA_LEFT
+    if not header:
+        return
+    ncols = len(header)
+    fn_b = st["hdr"].fontName; fn = st["cell"].fontName
+    hdr_white = ParagraphStyle("HW2", fontName=fn_b, fontSize=9,
+                               alignment=TA_CENTER, leading=11, textColor=HexColor("#FFFFFF"))
+    cell_st = ParagraphStyle("CL2", fontName=fn, fontSize=9, alignment=TA_LEFT, leading=11)
+    cell_c = ParagraphStyle("CC2", fontName=fn, fontSize=9, alignment=TA_CENTER, leading=11)
+
+    td = [[Paragraph(safe(h), hdr_white) for h in header]]
+    for row in rows:
+        td.append([Paragraph(safe(row[i] if i < len(row) else ""),
+                              cell_c if i == 0 else cell_st) for i in range(ncols)])
+
+    # Ширина колонок — равномерно по доступной ширине (16.5 см)
+    total_w = 16.5 * cm
+    col_w = [total_w / ncols] * ncols
+    # Первая колонка уже если это номер
+    if ncols > 1 and all(len(safe(r[0])) <= 5 for r in rows if r):
+        col_w[0] = 1.2 * cm
+        rest = (total_w - 1.2 * cm) / (ncols - 1)
+        col_w = [1.2 * cm] + [rest] * (ncols - 1)
+
+    t = Table(td, colWidths=col_w, repeatRows=1)
+    t.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), HexColor("#1F5C99")),
+        ("GRID", (0, 0), (-1, -1), 0.5, HexColor("#AAAAAA")),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("TOPPADDING", (0, 0), (-1, -1), 3),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+        ("LEFTPADDING", (0, 0), (-1, -1), 3),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 3),
+        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [HexColor("#FFFFFF"), HexColor("#EEF4FB")]),
+    ]))
+    story.append(t)
+    story.append(Spacer(1, 8))
