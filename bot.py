@@ -587,7 +587,7 @@ async def _gen_criteria(uid, chat_id, context):
         await context.bot.send_message(chat_id=chat_id, text="Генерирую критерии допуска...")
         ctx_data = agent._context() if agent else context.user_data.get("custom_ctx", "")
         resp = claude.messages.create(
-            model="claude-sonnet-4-5", max_tokens=3000, system=system,
+            model="claude-sonnet-4-6", max_tokens=3000, system=system,
             messages=[{"role": "user", "content": "Данные закупки:\n" + ctx_data}])
         content = resp.content[0].text
         remember(uid, content)
@@ -629,7 +629,7 @@ async def _gen_criteria_custom(uid, chat_id, context, details):
     try:
         await context.bot.send_message(chat_id=chat_id, text="Ищу релевантные примеры и генерирую критерии...")
         resp = claude.messages.create(
-            model="claude-sonnet-4-5", max_tokens=3000, system=system,
+            model="claude-sonnet-4-6", max_tokens=3000, system=system,
             messages=[{"role": "user", "content": "Направление: " + custom_name + "\nДетали закупки: " + details}])
         content = resp.content[0].text
         remember(uid, content)
@@ -673,7 +673,7 @@ async def apply_review_edits(uid, chat_id, update, context, edits):
     await context.bot.send_message(chat_id=chat_id, text="Вношу правки...")
     try:
         resp = claude.messages.create(
-            model="claude-sonnet-4-5", max_tokens=6000, system=REVIEW_SYSTEM,
+            model="claude-sonnet-4-6", max_tokens=6000, system=REVIEW_SYSTEM,
             messages=[{"role": "user", "content": "Документ:\n" + doc_info["content"] +
                        "\n\nПравки:\n" + edits + "\n\nВерни исправленный документ."}])
         new_content = resp.content[0].text
@@ -730,7 +730,7 @@ async def _gen_negotiation(chat_id, context):
                     for i in range(len(NEGOTIATION_STEPS)) if i in answers)
     try:
         resp = claude.messages.create(
-            model="claude-sonnet-4-5", max_tokens=4000, system=NEGOTIATION_SYSTEM,
+            model="claude-sonnet-4-6", max_tokens=4000, system=NEGOTIATION_SYSTEM,
             messages=[{"role": "user", "content": "Данные:\n" + ctx + "\n\nСоставь конкретный сценарий без воды."}])
         content = resp.content[0].text
         uid = chat_id
@@ -803,7 +803,7 @@ async def _gen_letter(uid, chat_id, context, comment):
             prompt = "Задание: " + comment + "\n\nСоставь профессиональное деловое письмо."
             fname = "Pismo.docx"; cap = "✉️ Письмо готово!"
         resp = claude.messages.create(
-            model="claude-sonnet-4-5", max_tokens=2000, system=LETTER_SYSTEM,
+            model="claude-sonnet-4-6", max_tokens=2000, system=LETTER_SYSTEM,
             messages=[{"role": "user", "content": prompt}])
         content = resp.content[0].text
         remember(uid, content)
@@ -835,7 +835,7 @@ async def _run_analysis(uid, chat_id, context, comment):
                   "5. НЕДОСТАЮЩИЕ ТРЕБОВАНИЯ\n6. КОНКРЕТНЫЕ ПРЕДЛОЖЕНИЯ ПО ДОРАБОТКЕ\n"
                   "По каждому замечанию давай конкретное предложение с готовой формулировкой.")
         resp = claude.messages.create(
-            model="claude-sonnet-4-5", max_tokens=4000, system=ANALYSIS_SYSTEM,
+            model="claude-sonnet-4-6", max_tokens=8000, system=ANALYSIS_SYSTEM,
             messages=[{"role": "user", "content": prompt}])
         analysis = resp.content[0].text
         remember(uid, analysis)
@@ -890,7 +890,7 @@ async def _run_doc_action(uid, chat_id, context, comment):
             fname = "Otvet_na_pismo.docx"; cap = "✉️ Ответное письмо готово!"
             dtype = "letter"
         resp = claude.messages.create(
-            model="claude-sonnet-4-5", max_tokens=4000, system=system,
+            model="claude-sonnet-4-6", max_tokens=4000, system=system,
             messages=[{"role": "user", "content": prompt}])
         content = resp.content[0].text
         remember(uid, content)
@@ -942,7 +942,7 @@ async def _run_photo_action(uid, chat_id, context, comment):
                       "\n\nОтредактируй письмо. Верни полный исправленный текст.")
             fname = "Otredaktirovannoe_pismo.docx"; cap = "✏️ Отредактированное письмо готово!"
         resp = claude.messages.create(
-            model="claude-sonnet-4-5", max_tokens=2000, system=system,
+            model="claude-sonnet-4-6", max_tokens=2000, system=system,
             messages=[{"role": "user", "content": prompt}])
         content = resp.content[0].text
         remember(uid, content)
@@ -986,7 +986,7 @@ async def handle_voice_smart(update, context, transcribed):
     try:
         import re as re_mod
         resp = claude.messages.create(
-            model="claude-sonnet-4-5", max_tokens=500,
+            model="claude-sonnet-4-6", max_tokens=500,
             system=VOICE_EXTRACT_SYSTEM,
             messages=[{"role": "user", "content": transcribed}])
         raw = resp.content[0].text.strip()
@@ -1140,7 +1140,7 @@ async def _process_customer_doc(uid, chat_id, update, context, doc_text):
     try:
         import re as re_mod
         resp = claude.messages.create(
-            model="claude-sonnet-4-5", max_tokens=2000,
+            model="claude-sonnet-4-6", max_tokens=2000,
             system='Проанализируй документ. Верни JSON: {"found": {"вопрос": "ответ"}, "missing": ["вопрос"]}. Только JSON.',
             messages=[{"role": "user", "content": "Вопросы:\n" + q_list + "\n\nДокумент:\n" + doc_text[:6000]}])
         raw = re_mod.sub(r"```json|```", "", resp.content[0].text).strip()
@@ -1185,7 +1185,7 @@ async def route_photo(update, context):
         await update.message.reply_text("Читаю текст с фото...")
         try:
             resp = claude.messages.create(
-                model="claude-sonnet-4-5", max_tokens=3000,
+                model="claude-sonnet-4-6", max_tokens=3000,
                 messages=[{"role": "user", "content": [
                     {"type": "image", "source": {"type": "base64", "media_type": mime, "data": b64}},
                     {"type": "text", "text": "Распознай весь текст с изображения. Выведи только текст."}]}])
@@ -1219,7 +1219,7 @@ async def route_photo(update, context):
         if caption: vision_prompt += "Вопрос пользователя: " + caption + "\n"
         vision_prompt += "\nФормат:\nОПИСАНИЕ: ...\nТЕКСТ: ...\nПОИСК: ..."
         vision = claude.messages.create(
-            model="claude-sonnet-4-5", max_tokens=1500,
+            model="claude-sonnet-4-6", max_tokens=1500,
             messages=[{"role": "user", "content": [
                 {"type": "image", "source": {"type": "base64", "media_type": mime, "data": b64}},
                 {"type": "text", "text": vision_prompt}]}])
@@ -1239,7 +1239,7 @@ async def route_photo(update, context):
         search_text = ""
         if search_q:
             try:
-                sr = claude.messages.create(model="claude-sonnet-4-5", max_tokens=1500,
+                sr = claude.messages.create(model="claude-sonnet-4-6", max_tokens=1500,
                     tools=[WEB_SEARCH_TOOL],
                     messages=[{"role": "user", "content": "Найди информацию: " + search_q}])
                 sm = [{"role": "user", "content": "Найди: " + search_q}]
@@ -1248,7 +1248,7 @@ async def route_photo(update, context):
                           for b in sr.content if b.type == "tool_use"]
                     sm.append({"role": "assistant", "content": sr.content})
                     sm.append({"role": "user", "content": tr})
-                    sr = claude.messages.create(model="claude-sonnet-4-5", max_tokens=1500,
+                    sr = claude.messages.create(model="claude-sonnet-4-6", max_tokens=1500,
                         tools=[WEB_SEARCH_TOOL], messages=sm)
                 search_text = "".join(b.text for b in sr.content if hasattr(b, "text"))
             except Exception as se:
@@ -1397,7 +1397,7 @@ async def chat_handler(update, context):
     if len(history) > 20: history = history[-20:]
     await update.message.reply_text("Думаю...")
     try:
-        resp = claude.messages.create(model="claude-sonnet-4-5", max_tokens=2000,
+        resp = claude.messages.create(model="claude-sonnet-4-6", max_tokens=2000,
                                        system=system, tools=[WEB_SEARCH_TOOL], messages=history)
         msgs = list(history)
         while resp.stop_reason == "tool_use":
@@ -1405,7 +1405,7 @@ async def chat_handler(update, context):
                   for b in resp.content if b.type == "tool_use"]
             msgs.append({"role": "assistant", "content": resp.content})
             msgs.append({"role": "user", "content": tr})
-            resp = claude.messages.create(model="claude-sonnet-4-5", max_tokens=2000,
+            resp = claude.messages.create(model="claude-sonnet-4-6", max_tokens=2000,
                                            system=system, tools=[WEB_SEARCH_TOOL], messages=msgs)
         reply = "".join(b.text for b in resp.content if hasattr(b, "text")) or "Не знаю что ответить."
         remember(uid, reply)
