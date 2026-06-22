@@ -542,3 +542,66 @@ def _build_generic_table_pdf(story, header, rows, st, safe):
     ]))
     story.append(t)
     story.append(Spacer(1, 8))
+
+async def generate_xlsx(data: str, name: str) -> str:
+    """Создаёт Excel-файл из markdown-таблицы или простого текста с разделителем |.
+    data может содержать несколько таблиц разделённых пустыми строками."""
+    import openpyxl
+    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+    import tempfile
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = name[:31] if name else "Лист1"
+
+    HEADER_FILL = PatternFill("solid", fgColor="1F5C99")
+    ROW_FILL_ALT = PatternFill("solid", fgColor="EEF4FB")
+    HEADER_FONT = Font(bold=True, color="FFFFFF", name="Calibri", size=11)
+    BODY_FONT = Font(name="Calibri", size=11)
+    thin = Side(style="thin", color="CCCCCC")
+    BORDER = Border(left=thin, right=thin, top=thin, bottom=thin)
+
+    current_row = 1
+    is_first_row_in_block = True
+
+    for line in data.strip().split("\n"):
+        line = line.strip()
+        if not line:
+            current_row += 1
+            is_first_row_in_block = True
+            continue
+        # Пропускаем строки-разделители |---|---|
+        if re.match(r'^[\|\-\s:]+$', line):
+            continue
+        if "|" in line:
+            cells = [c.strip() for c in line.strip("|").split("|")]
+            for col_idx, val in enumerate(cells, start=1):
+                cell = ws.cell(row=current_row, column=col_idx, value=val)
+                cell.border = BORDER
+                cell.alignment = Alignment(wrap_text=True, vertical="top")
+                if is_first_row_in_block:
+                    cell.fill = HEADER_FILL
+                    cell.font = HEADER_FONT
+                else:
+                    fill = ROW_FILL_ALT if current_row % 2 == 0 else PatternFill("solid", fgColor="FFFFFF")
+                    cell.fill = fill
+                    cell.font = BODY_FONT
+            is_first_row_in_block = False
+        else:
+            cell = ws.cell(row=current_row, column=1, value=line)
+            cell.font = BODY_FONT
+            is_first_row_in_block = False
+        current_row += 1
+
+    # Автоширина колонок
+    for col in ws.columns:
+        max_len = 0
+        col_letter = col[0].column_letter
+        for cell in col:
+            if cell.value:
+                max_len = max(max_len, len(str(cell.value)))
+        ws.column_dimensions[col_letter].width = min(max(max_len + 4, 12), 50)
+
+    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx", prefix="XLS_")
+    wb.save(tmp.name)
+    return tmp.name
