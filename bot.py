@@ -204,6 +204,18 @@ async def extract_doc_text(update):
             return "\n".join(p.extract_text() or "" for p in PdfReader(tmp.name).pages).strip()
         if fl.endswith(".txt") or "text" in mime:
             return data.decode("utf-8", errors="replace").strip()
+        if fl.endswith(".xlsx") or fl.endswith(".xls") or "spreadsheet" in mime or "excel" in mime:
+            import openpyxl
+            wb = openpyxl.load_workbook(tmp.name, read_only=True, data_only=True)
+            parts = []
+            for ws in wb.worksheets:
+                parts.append("=== Лист: " + ws.title + " ===")
+                for row in ws.iter_rows(values_only=True):
+                    cells = [str(c) if c is not None else "" for c in row]
+                    if any(c.strip() for c in cells):
+                        parts.append(" | ".join(cells))
+            wb.close()
+            return "\n".join(parts)
         if fl.endswith(".doc"):
             return None  # старый формат не поддерживаем
         # octet-stream или неизвестный mime — пробуем по очереди
@@ -249,17 +261,17 @@ async def send_q(msg, result):
 # ─── Клавиатуры ──────────────────────────────────────────────────────────────
 def nav_kb():
     return ReplyKeyboardMarkup(
-        [[KeyboardButton("/new — Новый документ"), KeyboardButton("/help — Помощь")]],
+        [[KeyboardButton("/new — Новый запрос"), KeyboardButton("/cancel — Отмена"), KeyboardButton("/help — Помощь")]],
         resize_keyboard=True, is_persistent=True)
 
 def menu_kb():
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("📄 Техническое задание", callback_data="menu_tz")],
         [InlineKeyboardButton("📋 Критерии допуска", callback_data="menu_criteria")],
-        [InlineKeyboardButton("📄+📋 ТЗ и критерии", callback_data="menu_both")],
         [InlineKeyboardButton("🤝 Сценарий переговоров", callback_data="menu_negotiation")],
         [InlineKeyboardButton("✉️ Написать письмо", callback_data="menu_letter")],
         [InlineKeyboardButton("🔎 Анализ документа", callback_data="menu_analysis")],
+        [InlineKeyboardButton("⚖️ Сравнить два документа", callback_data="menu_compare")],
     ])
 
 def dir_kb(doc_type="tz_only"):
@@ -267,9 +279,8 @@ def dir_kb(doc_type="tz_only"):
         [InlineKeyboardButton("🧹 Клининговые услуги", callback_data="dir_cleaning")],
         [InlineKeyboardButton("💻 IT-услуги и автоматизация", callback_data="dir_it")],
         [InlineKeyboardButton("🔧 Ремонт и техобслуживание", callback_data="dir_repair")],
+        [InlineKeyboardButton("✏️ Свой вариант", callback_data="dir_custom")],
     ]
-    if doc_type == "criteria_only":
-        rows.append([InlineKeyboardButton("✏️ Свой вариант", callback_data="dir_custom")])
     return InlineKeyboardMarkup(rows)
 
 def hasdoc_kb():
@@ -320,10 +331,10 @@ def photo_action_kb():
 # ─── Распознавание намерений ─────────────────────────────────────────────────
 def detect_intent(text):
     tl = text.lower().strip()
-    if any(w in tl for w in ["тз и критерии", "техзадание и критерии", "и тз и критерии", "тз с критериями"]):
-        return "menu_both"
     if any(w in tl for w in ["проверь", "проанализируй", "экспертиза", "найди ошибки", "разбери", "анализ документа", "анализ тз", "сделай анализ"]):
         return "menu_analysis"
+    if any(w in tl for w in ["сравни", "сравнить", "сравнение", "отличия между", "разница между"]):
+        return "menu_compare"
     tz_words = ["тз", "техзадание", "техническое задание"]
     actions = ["нужно", "нужен", "нужны", "хочу", "сделай", "составь", "напиши", "подготовь", "создай"]
     if any(w in tl for w in tz_words):
@@ -457,7 +468,13 @@ async def cb_menu(update, context):
             "Найду ошибки, противоречия, завышенные требования и дам предложения.")
         return
 
-    doc_map = {"menu_tz": "tz_only", "menu_criteria": "criteria_only", "menu_both": "both"}
+    if q.data == "menu_compare":
+        set_mode(context, "awaiting_compare_doc1")
+        await q.edit_message_text(
+            "Загрузи первый документ (Word, PDF, Excel, txt):")
+        return
+
+    doc_map = {"menu_tz": "tz_only", "menu_criteria": "criteria_only"}
     doc_type = doc_map.get(q.data, "tz_only")
     context.user_data["doc_type"] = doc_type
     await q.edit_message_text("Выбери направление:", reply_markup=dir_kb(doc_type))
@@ -465,11 +482,20 @@ async def cb_menu(update, context):
 async def cb_direction(update, context):
     q = update.callback_query; await q.answer()
     direction = q.data.replace("dir_", "")
+    doc_type = context.user_data.get("doc_type", "tz_only")
     if direction == "custom":
-        set_mode(context, "awaiting_custom_direction")
-        await q.edit_message_text(
-            "Напиши направление закупки своими словами\n"
-            "(например: охрана объектов, вывоз мусора, обслуживание лифтов):")
+        if doc_type == "criteria_only":
+            # Для критериев — старый флоу: просто название направления
+            set_mode(context, "awaiting_custom_direction")
+            await q.edit_message_text(
+                "Напиши направление закупки своими словами\n"
+                "(например: охрана объектов, вывоз мусора, обслуживание лифтов):")
+        else:
+            # Для ТЗ — новый флоу: свободная генерация с загрузкой примеров
+            set_mode(context, "awaiting_free_tz_name")
+            await q.edit_message_text(
+                "Напиши что именно закупаем — название или краткое описание:\n"
+                "(например: создание имиджевых буклетов, охрана объектов, вывоз мусора)")
         return
     context.user_data["direction"] = direction
     await q.edit_message_text(
@@ -661,6 +687,160 @@ async def cb_criteria_q(update, context):
         return
     await q.edit_message_text("Генерирую критерии...")
     await _gen_criteria(uid, q.message.chat_id, context)
+
+# ─── Свободное ТЗ (любое направление) ───────────────────────────────────────
+FREE_TZ_SYSTEM = """Ты эксперт по коммерческим закупкам работ и услуг.
+Тебе нужно составить Техническое задание для закупки по нестандартному направлению.
+
+Если есть примеры ТЗ по похожим закупкам — используй их как образец структуры.
+Если примеров нет — составь полноценное ТЗ самостоятельно: введение, предмет договора, требования к исполнителю, объём работ, сроки, порядок сдачи-приёмки.
+Используй таблицы там где уместно (перечень работ, объекты, сроки).
+Деловой стиль. Русский язык. Начни с заголовка ТЕХНИЧЕСКОЕ ЗАДАНИЕ."""
+
+FREE_TZ_QUESTIONS_SYSTEM = """Ты эксперт по коммерческим закупкам работ и услуг.
+Пользователь хочет составить ТЗ по направлению: {direction}
+
+Задавай конкретные вопросы по одному, чтобы собрать всё необходимое для ТЗ.
+Исходя из типа закупки определи какие параметры важны — объём, сроки, требования к исполнителю, адрес объекта, периодичность и т.д.
+Задай 4-7 самых важных вопросов. Когда данных достаточно — скажи "Данных достаточно, генерирую ТЗ" и сгенерируй его.
+Русский язык."""
+
+async def _free_tz_start(uid, chat_id, context, tz_name):
+    """Запускает флоу свободного ТЗ после получения названия."""
+    context.user_data["free_tz_name"] = tz_name
+    context.user_data["free_tz_docs"] = []
+    context.user_data["free_tz_history"] = []
+    set_mode(context, "awaiting_free_tz_docs")
+    await context.bot.send_message(
+        chat_id=chat_id,
+        text="Понял! Закупка: " + tz_name + "\n\n"
+             "Есть примеры ТЗ по аналогичным закупкам или другие полезные документы? "
+             "Загрузи их — использую как образец.\n\n"
+             "Когда загрузишь всё нужное — напиши «готово». "
+             "Если документов нет — просто напиши «нет» и я задам вопросы.",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("Нет документов, задавай вопросы", callback_data="free_tz_no_docs")],
+        ])
+    )
+
+async def cb_free_tz_nodocs(update, context):
+    """Пользователь выбрал 'нет документов' — переходим к вопросам."""
+    q = update.callback_query; await q.answer()
+    uid = update.effective_user.id
+    tz_name = context.user_data.get("free_tz_name", "закупка")
+    await q.edit_message_text("Хорошо, задам вопросы для составления ТЗ.")
+    await _free_tz_ask_question(uid, q.message.chat_id, context)
+
+async def _free_tz_ask_question(uid, chat_id, context):
+    """Задаёт следующий вопрос по ТЗ через диалог с Claude."""
+    tz_name = context.user_data.get("free_tz_name", "закупка")
+    history = context.user_data.get("free_tz_history", [])
+    docs = context.user_data.get("free_tz_docs", [])
+    set_mode(context, "free_tz_qa")
+
+    system = FREE_TZ_QUESTIONS_SYSTEM.replace("{direction}", tz_name)
+    docs_ctx = ""
+    if docs:
+        docs_ctx = "\n\nЗагруженные документы:\n" + "\n\n---\n\n".join(docs[:3])
+
+    messages = [{"role": "user", "content": "Направление закупки: " + tz_name + docs_ctx}]
+    for h in history:
+        messages.append(h)
+
+    try:
+        resp = claude.messages.create(
+            model="claude-sonnet-4-6", max_tokens=1000, system=system, messages=messages)
+        reply = resp.content[0].text
+        history.append({"role": "assistant", "content": reply})
+        context.user_data["free_tz_history"] = history
+
+        # Если Claude говорит что данных достаточно — генерируем ТЗ
+        if "данных достаточно" in reply.lower() or "генерирую тз" in reply.lower() or "ТЕХНИЧЕСКОЕ ЗАДАНИЕ" in reply:
+            await _free_tz_generate(uid, chat_id, context, from_qa=True, qa_content=reply)
+        else:
+            await context.bot.send_message(chat_id=chat_id, text=reply)
+    except Exception as e:
+        logger.error("FreeTZ QA: " + str(e), exc_info=True)
+        await context.bot.send_message(chat_id=chat_id, text="Ошибка. /new и попробуй заново.")
+
+async def _free_tz_generate(uid, chat_id, context, from_qa=False, qa_content=""):
+    """Генерирует ТЗ по накопленным данным."""
+    from docx_generator import generate_tz_docx
+    tz_name = context.user_data.get("free_tz_name", "ТЗ")
+    docs = context.user_data.get("free_tz_docs", [])
+    history = context.user_data.get("free_tz_history", [])
+
+    if from_qa and "ТЕХНИЧЕСКОЕ ЗАДАНИЕ" in qa_content:
+        # Claude уже вернул готовое ТЗ в qa_content
+        tz_text = qa_content
+    else:
+        await context.bot.send_message(chat_id=chat_id, text="Составляю ТЗ...")
+        docs_ctx = ""
+        if docs:
+            docs_ctx = "\n\nПримеры и документы пользователя:\n" + "\n\n---\n\n".join(docs[:4])
+        qa_ctx = ""
+        if history:
+            qa_ctx = "\n\nОтветы пользователя на вопросы:\n" + "\n".join(
+                (h["role"].upper() + ": " + h["content"]) for h in history)
+        user_msg = ("Направление закупки: " + tz_name + docs_ctx + qa_ctx +
+                    "\n\nСоставь полноценное Техническое задание.")
+        try:
+            resp = claude.messages.create(
+                model="claude-sonnet-4-6", max_tokens=8000, system=FREE_TZ_SYSTEM,
+                messages=[{"role": "user", "content": user_msg}])
+            tz_text = resp.content[0].text
+        except Exception as e:
+            logger.error("FreeTZ gen: " + str(e), exc_info=True)
+            await context.bot.send_message(chat_id=chat_id, text="Ошибка при генерации. Попробуй ещё раз.")
+            return
+
+    remember(uid, tz_text)
+    last_doc[uid] = {"content": tz_text, "type": "tz", "name": tz_name}
+    path = await generate_tz_docx(tz_text, tz_name)
+    await send_file(context, chat_id, path, "TZ_" + tz_name[:30] + ".docx", "📄 Техническое задание готово!")
+    set_mode(context, None)
+    await send_review(context, chat_id)
+
+# ─── Сравнение двух документов ───────────────────────────────────────────────
+COMPARE_SYSTEM = """Ты эксперт по коммерческим закупкам и деловым документам.
+Тебе дали два документа для сравнения. Задача пользователя указана отдельно.
+
+Проведи детальное сравнение согласно заданию. Структурируй результат:
+1. КРАТКИЙ ВЫВОД — 2-3 предложения о главном
+2. ОСНОВНЫЕ РАЗЛИЧИЯ — по пунктам, конкретно
+3. ПРОТИВОРЕЧИЯ — если есть несоответствия между документами
+4. ВЫВОДЫ И РЕКОМЕНДАЦИИ
+
+Если задание конкретное (например "найди различия в объёмах работ") — фокусируйся именно на этом.
+Русский язык."""
+
+async def _run_comparison(uid, chat_id, context):
+    """Запускает сравнение двух загруженных документов."""
+    from docx_generator import generate_tz_docx
+    doc1 = context.user_data.get("compare_doc1", "")
+    doc2 = context.user_data.get("compare_doc2", "")
+    task = context.user_data.get("compare_task", "Найди все различия и противоречия")
+    name1 = context.user_data.get("compare_name1", "Документ 1")
+    name2 = context.user_data.get("compare_name2", "Документ 2")
+
+    await context.bot.send_message(chat_id=chat_id, text="Сравниваю документы...")
+    prompt = ("Документ 1 (" + name1 + "):\n" + doc1[:6000] +
+              "\n\n---\n\nДокумент 2 (" + name2 + "):\n" + doc2[:6000] +
+              "\n\n---\n\nЗадание пользователя: " + task)
+    try:
+        resp = claude.messages.create(
+            model="claude-sonnet-4-6", max_tokens=4000, system=COMPARE_SYSTEM,
+            messages=[{"role": "user", "content": prompt}])
+        result = resp.content[0].text
+        remember(uid, result)
+        last_doc[uid] = {"content": result, "type": "analysis", "name": "Sravnenie"}
+        path = await generate_tz_docx(result, "Sravnenie")
+        await send_file(context, chat_id, path, "Sravnenie_dokumentov.docx", "⚖️ Сравнение документов готово!")
+        set_mode(context, None)
+        await send_review(context, chat_id)
+    except Exception as e:
+        logger.error("Compare: " + str(e), exc_info=True)
+        await context.bot.send_message(chat_id=chat_id, text="Ошибка при сравнении. Попробуй ещё раз.")
 
 # ─── Правки (review) ─────────────────────────────────────────────────────────
 async def cb_review(update, context):
@@ -1134,6 +1314,33 @@ async def route_document(update, context):
             "Документ получен. На что обратить особое внимание? (или просто 'анализируй')")
         return
 
+    # ─── Новые режимы ───
+    if mode == "awaiting_free_tz_docs":
+        docs = context.user_data.setdefault("free_tz_docs", [])
+        docs.append(fname + ":\n" + doc_text[:4000])
+        await update.message.reply_text(
+            "Получил: " + fname + " ✓\n\n"
+            "Загрузи ещё файлы если нужно, или напиши «готово» чтобы я сформировал ТЗ.")
+        return
+
+    if mode == "awaiting_compare_doc1":
+        context.user_data["compare_doc1"] = doc_text
+        context.user_data["compare_name1"] = fname
+        set_mode(context, "awaiting_compare_doc2")
+        await update.message.reply_text(
+            "Получил: " + fname + " ✓\n\nТеперь загрузи второй документ:")
+        return
+
+    if mode == "awaiting_compare_doc2":
+        context.user_data["compare_doc2"] = doc_text
+        context.user_data["compare_name2"] = fname
+        set_mode(context, "awaiting_compare_task")
+        await update.message.reply_text(
+            "Получил: " + fname + " ✓\n\n"
+            "Что именно сравнивать? Напиши конкретную задачу\n"
+            "(например: «найди различия в объёмах работ», «проверь нет ли противоречий», «сравни требования к исполнителю»):")
+        return
+
     # Вне режимов — спрашиваем что делать
     context.user_data["received_doc_text"] = doc_text
     context.user_data["received_doc_name"] = fname
@@ -1388,6 +1595,36 @@ async def chat_handler(update, context):
         set_mode(context, None)
         await _run_photo_action(uid, chat_id, context, text); return
 
+    # ── Новые режимы ──
+    if mode == "awaiting_free_tz_name":
+        set_mode(context, None)
+        await _free_tz_start(uid, chat_id, context, text); return
+
+    if mode == "awaiting_free_tz_docs":
+        tl_lower = text.lower().strip()
+        if tl_lower in ("готово", "готов", "всё", "всё загрузил", "загрузил", "нет", "нет документов", "без документов"):
+            docs = context.user_data.get("free_tz_docs", [])
+            if docs:
+                await update.message.reply_text("Отлично, документы получены! Генерирую ТЗ...")
+                await _free_tz_generate(uid, chat_id, context)
+            else:
+                await update.message.reply_text("Хорошо, задам вопросы для составления ТЗ.")
+                await _free_tz_ask_question(uid, chat_id, context)
+        else:
+            await update.message.reply_text("Загружай файлы, или напиши «готово» чтобы я начал составлять ТЗ, или «нет» если документов нет.")
+        return
+
+    if mode == "free_tz_qa":
+        history = context.user_data.get("free_tz_history", [])
+        history.append({"role": "user", "content": text})
+        context.user_data["free_tz_history"] = history
+        await _free_tz_ask_question(uid, chat_id, context); return
+
+    if mode == "awaiting_compare_task":
+        context.user_data["compare_task"] = text
+        set_mode(context, None)
+        await _run_comparison(uid, chat_id, context); return
+
     # ── Вне режимов ──
     tl = text.lower()
     if any(w in tl for w in ["сохрани", "в ворд", "в word", "сделай файл"]):
@@ -1432,6 +1669,7 @@ async def chat_handler(update, context):
 
 async def _handle_intent_text(update, context, intent):
     uid = update.effective_user.id
+    chat_id = update.message.chat_id
     if intent == "menu_negotiation":
         context.user_data["neg_answers"] = {}; context.user_data["neg_step"] = 0
         set_mode(context, "negotiation")
@@ -1443,8 +1681,11 @@ async def _handle_intent_text(update, context, intent):
             "Загрузи документ для экспертизы (Word, PDF, txt, фото или вставь текст).")
     elif intent == "menu_letter":
         await update.message.reply_text("Что нужно?", reply_markup=letter_type_kb())
+    elif intent == "menu_compare":
+        set_mode(context, "awaiting_compare_doc1")
+        await update.message.reply_text("Загрузи первый документ (Word, PDF, Excel, txt):")
     else:
-        doc_map = {"menu_tz": "tz_only", "menu_criteria": "criteria_only", "menu_both": "both"}
+        doc_map = {"menu_tz": "tz_only", "menu_criteria": "criteria_only"}
         doc_type = doc_map.get(intent, "tz_only")
         context.user_data["doc_type"] = doc_type
         await update.message.reply_text("Выбери направление закупки:", reply_markup=dir_kb(doc_type))
@@ -1464,18 +1705,19 @@ def main():
     app.add_handler(CommandHandler("removeuser", cmd_removeuser))
 
     # Все callbacks — глобальные, работают из любого места
-    app.add_handler(CallbackQueryHandler(cb_menu,         pattern="^menu_"))
-    app.add_handler(CallbackQueryHandler(cb_direction,    pattern="^dir_"))
-    app.add_handler(CallbackQueryHandler(cb_hasdoc,       pattern="^hasdoc_"))
-    app.add_handler(CallbackQueryHandler(cb_answer,       pattern="^ans_"))
-    app.add_handler(CallbackQueryHandler(cb_neg,          pattern="^neg_"))
-    app.add_handler(CallbackQueryHandler(cb_criteria_q,   pattern="^(yes|no)_criteria$"))
-    app.add_handler(CallbackQueryHandler(cb_review,       pattern="^review_"))
-    app.add_handler(CallbackQueryHandler(cb_fmt,          pattern="^fmt_"))
-    app.add_handler(CallbackQueryHandler(cb_letter_type,  pattern="^letter_"))
-    app.add_handler(CallbackQueryHandler(cb_doc_action,   pattern="^docact_"))
-    app.add_handler(CallbackQueryHandler(cb_photo_action, pattern="^photo_act_"))
-    app.add_handler(CallbackQueryHandler(cb_save_to_word, pattern="^save_to_word$"))
+    app.add_handler(CallbackQueryHandler(cb_menu,             pattern="^menu_"))
+    app.add_handler(CallbackQueryHandler(cb_direction,        pattern="^dir_"))
+    app.add_handler(CallbackQueryHandler(cb_hasdoc,           pattern="^hasdoc_"))
+    app.add_handler(CallbackQueryHandler(cb_answer,           pattern="^ans_"))
+    app.add_handler(CallbackQueryHandler(cb_neg,              pattern="^neg_"))
+    app.add_handler(CallbackQueryHandler(cb_criteria_q,       pattern="^(yes|no)_criteria$"))
+    app.add_handler(CallbackQueryHandler(cb_review,           pattern="^review_"))
+    app.add_handler(CallbackQueryHandler(cb_fmt,              pattern="^fmt_"))
+    app.add_handler(CallbackQueryHandler(cb_letter_type,      pattern="^letter_"))
+    app.add_handler(CallbackQueryHandler(cb_doc_action,       pattern="^docact_"))
+    app.add_handler(CallbackQueryHandler(cb_photo_action,     pattern="^photo_act_"))
+    app.add_handler(CallbackQueryHandler(cb_save_to_word,     pattern="^save_to_word$"))
+    app.add_handler(CallbackQueryHandler(cb_free_tz_nodocs,   pattern="^free_tz_no_docs$"))
 
     # Сообщения — один роутер
     app.add_handler(MessageHandler(filters.PHOTO, chat_handler))
