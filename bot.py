@@ -204,18 +204,22 @@ async def extract_doc_text(update):
             return "\n".join(p.extract_text() or "" for p in PdfReader(tmp.name).pages).strip()
         if fl.endswith(".txt") or "text" in mime:
             return data.decode("utf-8", errors="replace").strip()
-        if fl.endswith(".xlsx") or fl.endswith(".xls") or "spreadsheet" in mime or "excel" in mime:
-            import openpyxl
-            wb = openpyxl.load_workbook(tmp.name, read_only=True, data_only=True)
-            parts = []
-            for ws in wb.worksheets:
-                parts.append("=== Лист: " + ws.title + " ===")
-                for row in ws.iter_rows(values_only=True):
-                    cells = [str(c) if c is not None else "" for c in row]
-                    if any(c.strip() for c in cells):
-                        parts.append(" | ".join(cells))
-            wb.close()
-            return "\n".join(parts)
+        if fl.endswith(".xlsx") or fl.endswith(".xls") or "spreadsheet" in mime or "excel" in mime or "openxmlformats" in mime:
+            try:
+                import openpyxl
+                wb = openpyxl.load_workbook(tmp.name, read_only=True, data_only=True)
+                parts = []
+                for ws in wb.worksheets:
+                    parts.append("=== Лист: " + ws.title + " ===")
+                    for row in ws.iter_rows(values_only=True):
+                        cells = [str(c) if c is not None else "" for c in row]
+                        if any(c.strip() for c in cells):
+                            parts.append(" | ".join(cells))
+                wb.close()
+                return "\n".join(parts)
+            except Exception as e:
+                logger.error("Excel read error: " + str(e), exc_info=True)
+                return None
         if fl.endswith(".doc"):
             return None  # старый формат не поддерживаем
         # octet-stream или неизвестный mime — пробуем по очереди
