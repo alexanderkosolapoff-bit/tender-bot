@@ -224,6 +224,20 @@ async def extract_doc_text(update):
         except Exception:
             pass
         try:
+            import openpyxl as _opx
+            wb2 = _opx.load_workbook(tmp.name, read_only=True, data_only=True)
+            parts2 = []
+            for ws2 in wb2.worksheets:
+                parts2.append("=== Лист: " + ws2.title + " ===")
+                for row2 in ws2.iter_rows(values_only=True):
+                    cells2 = [str(c) if c is not None else "" for c in row2]
+                    if any(c.strip() for c in cells2):
+                        parts2.append(" | ".join(cells2))
+            wb2.close()
+            if parts2: return "\n".join(parts2)
+        except Exception:
+            pass
+        try:
             from pypdf import PdfReader
             t = "\n".join(p.extract_text() or "" for p in PdfReader(tmp.name).pages).strip()
             if t: return t
@@ -1286,8 +1300,8 @@ async def route_document(update, context):
     if not doc_text:
         await update.message.reply_text(
             "Не смог прочитать файл '" + fname + "'.\n"
-            "Поддерживаю: .docx, .pdf, .txt (старый .doc - нет).\n"
-            "Если файл .docx и не читается - пересохрани его в Word заново.")
+            "Поддерживаю: .docx, .pdf, .txt, .xlsx (старый .doc и .xls — нет).\n"
+            "Если файл .docx/.xlsx и не читается — пересохрани его заново.")
         return
 
     if mode == "awaiting_customer_doc":
